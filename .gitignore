@@ -4,3 +4,5 @@
 **/.vs
 **/Debug/**
 **/x64/
+
+/multi-threads
