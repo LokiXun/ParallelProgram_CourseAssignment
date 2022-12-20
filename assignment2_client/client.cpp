@@ -219,7 +219,7 @@ float sum(const float data[], const int len) {
 	//分块求和
 	for (int i = 0; i < MAX_THREADS; ++i) {
 		int subDataStartIndex = i * subDataNum;
-		int SubDataElementNum = (i+1 == subDataNum) ? (len - subDataStartIndex) : subDataNum; // 判断此块元素个数
+		int SubDataElementNum = (i+1 == MAX_THREADS) ? (len - subDataStartIndex) : subDataNum; // 判断此块元素个数
 
 		for (int j = 0; j < SubDataElementNum; ++j) {
 			//retSum[i] += log(sqrt(data[j + subDataStartIndex]));  // 模拟任务，增加计算量
