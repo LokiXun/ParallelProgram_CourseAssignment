@@ -1,4 +1,4 @@
-﻿# Parallel Programming Course Assignment :baby_chick:
+﻿﻿# Parallel Programming Course Assignment :baby_chick:
 
 Team: RongjiXun, JianLiangChen
 
@@ -134,4 +134,3 @@ for (size_t i = 0; i < DATANUM; i++)//数据初始化
   \therefore \text{the computation time y is minimum when } x=\sqrt{C}, \\
   \text{ has x workers>>} \sqrt{C} \quad \\\text{ to compute max element their own part of array in parallel.}
   $$
-  

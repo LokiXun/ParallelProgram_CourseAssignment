@@ -11,6 +11,7 @@
 #define DATANUM (SUBDATANUM * MAX_THREADS)   /*这个数值是总数据量*/
 #define SERVER_ADDRESS "127.0.0.1"//Server端IP地址
 #define SERVER_PORT 10086
+#define RANDOM_SEED 1
 
 
 
@@ -47,7 +48,15 @@ int addrlen = sizeof(addr);//addr数据长度
 SOCKET sListen;
 SOCKET servConnection;//servConnection为服务端连接
 
-
+int ThreadID[MAX_THREADS];
+float floatResults[MAX_THREADS];//每个线程的中间结果
+HANDLE hSemaphores[MAX_THREADS];//信号量，保证不重入。等同于mutex
+typedef struct _thread_data {
+	int thread_id;
+	const float* data;
+	int start_index;
+	int end_index;
+} THREAD_DATA;
 
 #pragma endregion
 
@@ -74,12 +83,19 @@ int main() {
 
 	//初始化
 	//待测试数据
+	srand(RANDOM_SEED);
 	float* rawFloatData = new float[DATANUM];
 	for (size_t i = 0; i < DATANUM; i++) {//数据初始化
-		rawFloatData[i] = float(i + 1);
+		rawFloatData[i] = fabs(double(rand()));  // float(i + 1);
 	}
 	float* result = new float[DATANUM] {0};//存放排序过的float数组
 	float ret = 0.0f;
+
+	for (size_t i = 0; i < min(DATANUM, 30); i++) {
+		std::cout << rawFloatData[i] << " ";
+	}
+	std::cout << std::endl;
+
 	//循环控制
 	int lpFlag;
 
@@ -94,7 +110,6 @@ int main() {
 	enum Method mtd = Method::WAIT;
 	while (lpFlag == 0) {
 		//TODO:总之这部分仅仅是实现了功能，对于连接中断后的处理，连接的多线程化以及线程池管理等都没有做。
-		//问题就是多线程我不熟悉，运行逻辑也不清楚
 		recv(servConnection, (char*)&mtd, sizeof(int), NULL);//接收指令
 		cout << "Client message received.";
 		switch (mtd) {
@@ -259,19 +274,19 @@ float SumArray_speedUp(const float data[], const int startIndex, const int endIn
 float sumSpeedUp(const float data[], const int len) {
 
 	float ret;
-	float* retSum = new float[2]{ 0 };
-	int ind = int(len / 2) -1;//ind指client段所需计算到的下标
+	float* retSum = new float[2] { 0 };
+	int ind = int(len / 2) - 1;//ind指client段所需计算到的下标
 
 	// 0. 任务分配
 	// 目前只有2台机器，发送前一半给client计算，后一半自己算
 	send(servConnection, (char*)&ind, sizeof(int), NULL);
 
 	//1. server 算计算另一半 TODO: 调用client里面的同一个函数
-	retSum[0] = SumArray_speedUp(data, ind, len-1);
-	
+	retSum[0] = SumArray_speedUp(data, ind + 1, len - 1);
+
 	//2. 接收Client端的结果
 	recv(servConnection, (char*)&retSum[1], sizeof(float), NULL);
-	
+
 	//3. 整合结果
 	ret = retSum[0] + retSum[1];
 	std::cout << "Sum SpeedUp Calculate Finished! reesult = " << ret << std::endl;
@@ -283,9 +298,9 @@ float sumSpeedUp(const float data[], const int len) {
 }
 
 /*
-* 求最大值加速版（单机版）
+* 求最大值加速版（单机版） TODO
 * @data 待求和的float一维数组
-* @len float数组长度
+* @endIndex 数组待处理范围的末尾元素下标
 * @return 数组data全元素中最大值
 */
 float singleSpdMax(const float data[], const int stInd, const int len) {
@@ -318,32 +333,110 @@ float singleSpdMax(const float data[], const int stInd, const int len) {
 	return ret;
 }
 
+/*
+* 求最大值 多线程版本
+* @data 待求和的float一维数组
+* @endIndex 数组待处理范围的末尾元素下标
+* @return 数组data全元素中最大值
+*/
+DWORD WINAPI maxArray_multithread(LPVOID lpParameter)
+{
+	THREAD_DATA* threadData = (THREAD_DATA*)lpParameter;
+	//cout << who << endl;
+
+	float max_value = threadData->data[threadData->start_index];
+	for (size_t i = threadData->start_index; i <= threadData->end_index; i++)
+	{
+		max_value = max_value >= threadData->data[i] ? max_value : threadData->data[i];//
+	}
+	floatResults[threadData->thread_id] = max_value;
+	ReleaseSemaphore(hSemaphores[threadData->thread_id], 1, NULL);//释放信号量，信号量加1 
+
+	return 0;
+}
 
 /**
-* 加速版求最大值
+* 加速版求最大值 多线程
 * @data 待求最大元素的float一维数组
 * @len float数组长度
 * @return 数组data各元素中的最大值
 */
 float maxSpeedUp(const float data[], const int len) {
 	float ret;
-	//TODO:本来想搞更灵活的调度方式的，但是多线程没搞懂
-	float* retMax = new float[2]{ 0 };
-	int ind = len / 2;//ind指client段所需计算到的下标
-	send(servConnection, (char*)&ind, sizeof(int), NULL);//发送运算任务
-	//然后server端自己算
-	retMax[0] = singleSpdMax(data, ind, len - ind);
-	//接收Client端的结果
+	float* retMax = new float[2] { 0 };
+	int ind = int(len / 2) - 1;//ind指client段所需计算到的下标
+
+	// 0. 任务分配
+	send(servConnection, (char*)&ind, sizeof(int), NULL);
+
+
+	//1. server 计算后面一半
+	LARGE_INTEGER start_time, end_time, time_freq;
+	QueryPerformanceFrequency(&time_freq);
+	QueryPerformanceCounter(&start_time);//start  
+	/*					multi-thread									*/
+	int waited_array_start_index = int(ind) + 1;
+	int each_thread_process_num = ceil((len - waited_array_start_index) / MAX_THREADS);
+	THREAD_DATA* current_thread_data = new THREAD_DATA[MAX_THREADS];
+	HANDLE hThreads[MAX_THREADS];
+	// 1.1 create thread task
+	for (int i = 0; i < MAX_THREADS; i++)
+	{
+		hSemaphores[i] = CreateSemaphore(NULL, 0, 1, NULL);//CreateEvent(NULL,TRUE,FALSE)等价？
+		ThreadID[i] = i;
+		floatResults[i] = 0;
+
+		// 线程输入数据
+		current_thread_data[i].thread_id = i;
+		current_thread_data[i].data = data;
+		current_thread_data[i].start_index = min(waited_array_start_index + i * each_thread_process_num, len - 1);
+		current_thread_data[i].end_index = min(current_thread_data[i].start_index + each_thread_process_num - 1, len - 1);
+		floatResults[i] = data[waited_array_start_index];  // set default
+
+		hThreads[i] = CreateThread(
+			NULL,// default security attributes
+			0,// use default stack size
+			maxArray_multithread,// thread function
+			&current_thread_data[i],// argument to thread function
+			CREATE_SUSPENDED, // use default creation flags.0 means the thread will be run at once  CREATE_SUSPENDED
+			NULL);
+
+		if (hThreads[i] == NULL)
+		{
+			printf("WARN: hThreads=%d CreateThread error: %d\n", i, GetLastError());
+			throw std::exception("WARN: getMax CreateThread error!");
+		}
+	}
+	// 1.2.execute + wait
+	for (int i = 0; i < MAX_THREADS; i++)
+	{
+		ResumeThread(hThreads[i]);
+	}
+	std::cout << "Satrt WaitForMultipleObjects for 2mins!" << std::endl;
+	DWORD ThreadFinished = WaitForMultipleObjects(MAX_THREADS, hSemaphores, TRUE, 2 * 60 * 1000);
+	if (!((WAIT_OBJECT_0 <= ThreadFinished)  && (ThreadFinished <= (WAIT_OBJECT_0 + MAX_THREADS - 1)))) {
+		// exception
+		printf("WARN: thread end exception! ThreadFinished=%d", ThreadFinished);
+		throw std::exception("WARN: getMax thread end exception!");
+	}
+
+	// 1.3 get result
+	retMax[0] = data[waited_array_start_index];
+	for (int i = 0; i < MAX_THREADS; i++)
+		retMax[0] = retMax[0] > floatResults[i] ? retMax[0] : floatResults[i];
+
+	QueryPerformanceCounter(&end_time);//start 
+	std::cout << "Server Get Maxiumu finished! max_value=" << retMax[0] <<
+		", costs = " << ((double)end_time.QuadPart - start_time.QuadPart) / (double)time_freq.QuadPart << "s" << std::endl;
+
+	//2. 接收Client端的结果
 	recv(servConnection, (char*)&retMax[1], sizeof(float), NULL);
-	//整合结果
-	if (retMax[0] > retMax[1]) {
-		ret = retMax[0];
-	}
-	else {
-		ret = retMax[1];
-	}
-	//把最终结果返回Client端
-	send(servConnection, (char*)&ret, sizeof(ret), NULL);
+
+	//3. 整合结果
+	ret = retMax[0] > retMax[1] ? retMax[0] : retMax[1];
+	QueryPerformanceCounter(&end_time);//start 
+	std::cout << "Max SpeedUp: result =" << ret << ", costs = " << 
+		((double)end_time.QuadPart - start_time.QuadPart) / (double)time_freq.QuadPart << "s" << std::endl;
 
 	return ret;
 }
@@ -360,7 +453,7 @@ float maxSpeedUp(const float data[], const int len) {
 * @return 数组data排序后的结果
 */
 float singleSpdSort(const float data[], const int stInd, const int len, float result[]) {
-	float* res = new float[8]{ 0 };//SSE加速的中间
+	float* res = new float[8] { 0 };//SSE加速的中间
 	int sse_iter = len / 8;//SSE迭代总长度
 	const float* stPtr = data + stInd;//偏移后的数组首地址
 
@@ -386,14 +479,14 @@ float singleSpdSort(const float data[], const int stInd, const int len, float re
 float sortSpeedUp(const float data[], const int len, float result[]) {
 
 	int ind = len / 2;//ind指client段所需计算到的长度（下标+1）
-	float** retSort = new float* [2]{ new float[ind],new float[ind] };
+	float** retSort = new float* [2] { new float[ind], new float[ind] };
 	//0. 发送运算任务给 client
 	send(servConnection, (char*)&ind, sizeof(int), NULL);
 	//然后server端自己算
 	singleSpdSort(data, ind, len - ind, retSort[0]);
 	//接收Client端的结果
 	recv(servConnection, (char*)&retSort[1], ind * sizeof(float), NULL);
-	
+
 	// 整合结果
 	system("pause");
 

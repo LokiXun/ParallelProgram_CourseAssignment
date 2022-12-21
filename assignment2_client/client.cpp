@@ -11,6 +11,7 @@
 #define DATANUM (SUBDATANUM * MAX_THREADS)   /*这个数值是总数据量*/
 #define SERVER_ADDRESS "127.0.0.1"//Server端IP地址
 #define SERVER_PORT 10086
+#define RANDOM_SEED 1
 
 #pragma endregion
 
@@ -69,19 +70,21 @@ float test(float method(const float*, int, float*), float data[], int len, float
 
 
 //主函数
-//算法执行由Client端触发
-//TODO:由Server端调度任务分配
 int main() {
 	using namespace std;
 
 	//初始化
 	//数据测试相关
-	//TODO:在init阶段把测试数据从Server端获得，这样更泛用一些。
+	srand(RANDOM_SEED);
 	float* rawFloatData = new float[DATANUM];//待测试数据，分别初始化。为了减少heap占用，改为动态内存
 	for (size_t i = 0; i < DATANUM; i++) {//数据初始化
-		rawFloatData[i] = float(i + 1);
+		rawFloatData[i] = fabs(double(rand()));  // float(i + 1);
 	}
-	std::cout << "DATANUM=" << DATANUM << std::endl;
+	for (size_t i = 0; i < min(DATANUM, 10); i++) {
+		std::cout << rawFloatData[i] << " ";
+	}
+	std::cout << std::endl;
+
 	float* result = new float[DATANUM];
 	//流程控制
 	int lpFlag;//循环控制Flag
@@ -236,11 +239,12 @@ float sum(const float data[], const int len) {
 }
 
 float myMax(const float data[], const int len) {
-	float ret = log(sqrt(data[0]));
+	//float ret = log(sqrt(data[0]));
+	float ret = data[0];
 	for (int i = 0; i < len; ++i) {
-		float value = log(sqrt(data[i]));
-		if (ret < value) {
-			ret = value;
+		//float value = log(sqrt(data[i]));
+		if (ret < data[i]) {
+			ret = data[i];
 		}
 	}
 
@@ -376,7 +380,7 @@ float sumSpeedUp(const float data[], const int len) {
 	//获得任务分配: 前半段数组的结尾下标
 	recv(cltConnection, (char*)&ind, sizeof(int), NULL);
 	//求解分任务
-	ret = SumArray_speedUp(data, 0, ind-1);
+	ret = SumArray_speedUp(data, 0, ind);
 	std::cout << "Current Client Sum result = " << ret << std::endl;
 	//把结果发送给Server端整合
 	send(cltConnection, (char*)&ret, sizeof(ret), NULL);
@@ -402,7 +406,6 @@ float singleSpdMax(const float data[], const int stInd, const int len) {
 	//最大值赋初值
 	_mm256_store_ps(retMax, _mm256_log_ps(_mm256_sqrt_ps(*(__m256*)stPtr)));
 
-	//TODO:双机加速
 #pragma omp parallel for//omp多线程加速
 	for (int i = 0; i < MAX_THREADS; ++i) {
 		__m256* ptr = (__m256*)stPtr + i * sse_iter / MAX_THREADS;
@@ -442,11 +445,14 @@ float maxSpeedUp(const float data[], const int len) {
 	//获得任务分配
 	recv(cltConnection, (char*)&ind, sizeof(int), NULL);
 	//求解分任务
-	ret = singleSpdMax(data, 0, ind);
+	ret = myMax(data, ind+1);
+	std::cout << "Current Client Max result = " << ret << std::endl;
 	//把结果发送给Server端整合
 	send(cltConnection, (char*)&ret, sizeof(ret), NULL);
-	//从Server端得到最终结果
-	recv(cltConnection, (char*)&ret, sizeof(ret), NULL);
+	std::cout << "Send2Server success!" << std::endl;
+
+	////从Server端得到最终结果
+	//recv(cltConnection, (char*)&ret, sizeof(ret), NULL);
 
 	return ret;
 }
