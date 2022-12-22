@@ -60,6 +60,7 @@ int closeSocket();//关闭Socket
 float sumSpeedUp(const float data[], const int len); //data是原始数据，len为长度。结果通过函数返回
 float maxSpeedUp(const float data[], const int len);//data是原始数据，len为长度。结果通过函数返回
 float sortSpeedUp(const float data[], const int len, float result[]);//data是原始数据，len为长度。排序结果在result中。
+void quickSort(float* data, int lowIndex, int highIndex);
 
 //用于测试的函数
 float test(float method(const float*, int), float data[], int len);
@@ -251,32 +252,29 @@ float myMax(const float data[], const int len) {
 	return ret;
 }
 
+
 /*
-* 快速排序
-* 排序算法我不熟悉，抄的网上的算法，感觉有问题
+=================== SORT =====================
 */
-void quickSort(float* arr, int l, int r){
-	if (l < r){
-		int i = l, j = r;
-		double x = arr[i];
-		while (i < j){
-			while (i < j && arr[j] >= x){
-				j--;
-			}
-			if (i < j){
-				arr[i++] = arr[j];
-			}
-			while (i < j && arr[i] < x){
-				i++;
-			}
-			if (i < j){
-				arr[j--] = arr[i];
-			}
+
+void quickSort(float* data, int lowIndex, int highIndex){
+	int i = lowIndex, j = highIndex;
+	double x = data[i];
+
+	while (i < j) {
+		while (i < j and x <= data[j]) { j--; };
+		if (i < j) {
+			data[i++] = data[j];
 		}
-		arr[i] = x;
-		quickSort(arr, l, i - 1);
-		quickSort(arr, i + 1, r);
+		while (i < j and data[i] < data[j]) { i++; };
+		if (i < j) {
+			data[j--] = data[i];
+		}
 	}
+	data[i] = x;
+
+	if (lowIndex < i-1) { quickSort(data, 0, i - 1); }
+	if (highIndex > (i+1)) { quickSort(data, i + 1, highIndex); }
 }
 
 /*
@@ -286,7 +284,8 @@ void quickSort(float* arr, int l, int r){
 float sort(const float data[], const int len, float result[]) {
 	//深复制data
 	for (int i = 0; i < len; ++i) {
-		result[i] = log(sqrt(data[i]));
+		//result[i] = log(sqrt(data[i]));
+		result[i] = data[i];
 	}
 
 	//快速排序
@@ -295,6 +294,8 @@ float sort(const float data[], const int len, float result[]) {
 	return 0.0f;
 }
 
+
+// ================================SUM
 /*
 * Sum : Speed Up Using SSE + OpenMP 
 * Func 对数据部分范围 [startIndex，endIndex] 闭区间, 求和。按 8 个数分块，使用SSE 256bit，最后一块不足 8 个对的部分就直接加
@@ -497,6 +498,16 @@ float singleSpdSort(const float data[], const int stInd, const int len, float re
 	return 0.0f;
 }
 
+boolean checkSortedArray(const float data[], const int len) {
+
+	for (int i = 0; i < len-1; i++) {
+		if (data[i] > data[i+1]) {
+			return FALSE;
+		}
+	}
+	return TRUE;
+}
+
 /*
 * 排序算法加速版
 * @data 待求和的float一维数组
@@ -504,24 +515,31 @@ float singleSpdSort(const float data[], const int stInd, const int len, float re
 * @return 数组data排序后的结果
 */
 float sortSpeedUp(const float data[], const int len, float result[]) {
-	/*这部分是和服务器交互的
+	float ret;
 	int ind;
 	enum Method mtd = Method::MT_SORT;//请求类型为max方法
-	//向Server端发送分布运算请求
-	send(cltConnection, (char*)&mtd, sizeof(Method), NULL);
-	//获得任务分配
+	//0. 向Server端发送分布运算请求
+	 send(cltConnection, (char*)&mtd, sizeof(Method), NULL);
+	//1. 获得任务分配
 	recv(cltConnection, (char*)&ind, sizeof(int), NULL);
-	//求解分任务
-	float* ImdResult = new float[ind] { 0 };//存放中间结果
-	singleSpdSort(data, 0, ind, ImdResult);
-	//把结果发送给Server端整合
-	send(cltConnection, (char*)ImdResult, ind * sizeof(float), NULL);
-	//从Server端得到最终结果
-	recv(cltConnection, (char*)result, len * sizeof(float), NULL);
-	//回收ImdResult的堆区资源
-	delete[] ImdResult;
+
+	//2. 排序
+	sort(data, len, result);
+	std::cout << "Client sort result=";
+	for (int i = 0; i < len; i++) {
+		std::cout << data[i] << " ";
+	}
+	std::cout << std::endl;
+	// check
+	checkSortedArray(data, len);
+
+	//3. 把结果发送给Server端整合
+	/*
+	* TIPS: TCP在单机网上一次最大传输65536字节，即16384个float, 8192个double
+	* 在局域网内根据网卡，一次最大传输1500字节，即375个float, 187个double
 	*/
-	singleSpdSort(data, 0, len, result);//测试单机版
+
+	std::cout << "Send2Server success!" << std::endl;
 
 	return 0.0f;
 }

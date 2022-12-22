@@ -50,6 +50,7 @@ SOCKET servConnection;//servConnection为服务端连接
 
 int ThreadID[MAX_THREADS];
 float floatResults[MAX_THREADS];//每个线程的中间结果
+float** sortResultArraySequece = new float* [MAX_THREADS]; // server 排序结果
 HANDLE hSemaphores[MAX_THREADS];//信号量，保证不重入。等同于mutex
 typedef struct _thread_data {
 	int thread_id;
@@ -57,6 +58,17 @@ typedef struct _thread_data {
 	int start_index;
 	int end_index;
 } THREAD_DATA;
+
+typedef struct _thread_data_sort {
+	int thread_id;
+	int start_index;
+	int end_index;
+} THREAD_DATA_SORT;
+
+typedef struct merge_sorted_array {
+	float* merged_array;
+	int merged_len;
+} SORTED_ARRAY_MERGE;
 
 #pragma endregion
 
@@ -82,11 +94,14 @@ int main() {
 	using namespace std;
 
 	//初始化
-	//待测试数据
 	srand(RANDOM_SEED);
 	float* rawFloatData = new float[DATANUM];
+	float* sortSourceArray = new float[DATANUM];
+	float* sortResultsArray = new float[DATANUM];
+
 	for (size_t i = 0; i < DATANUM; i++) {//数据初始化
 		rawFloatData[i] = fabs(double(rand()));  // float(i + 1);
+		sortSourceArray[i] = rawFloatData[i];
 	}
 	float* result = new float[DATANUM] {0};//存放排序过的float数组
 	float ret = 0.0f;
@@ -95,7 +110,7 @@ int main() {
 		std::cout << rawFloatData[i] << " ";
 	}
 	std::cout << std::endl;
-
+	
 	//循环控制
 	int lpFlag;
 
@@ -125,9 +140,7 @@ int main() {
 			break;
 		case Method::MT_SORT:
 			cout << "Testing sortSpeedup method..." << endl;
-			sortSpeedUp(rawFloatData, DATANUM, result);
-			//排序检验的代码随便写的
-			cout << "The result is " << ((result[0] < result[1]) ? "right." : "wrong.") << endl;
+			sortSpeedUp(rawFloatData, DATANUM, sortResultsArray);
 			break;
 		case Method::END:
 			lpFlag = -1;
@@ -342,10 +355,9 @@ float singleSpdMax(const float data[], const int stInd, const int len) {
 DWORD WINAPI maxArray_multithread(LPVOID lpParameter)
 {
 	THREAD_DATA* threadData = (THREAD_DATA*)lpParameter;
-	//cout << who << endl;
 
 	float max_value = threadData->data[threadData->start_index];
-	for (size_t i = threadData->start_index; i <= threadData->end_index; i++)
+	for (int i = threadData->start_index; i <= (threadData->end_index); i++)
 	{
 		max_value = max_value >= threadData->data[i] ? max_value : threadData->data[i];//
 	}
@@ -376,7 +388,9 @@ float maxSpeedUp(const float data[], const int len) {
 	QueryPerformanceCounter(&start_time);//start  
 	/*					multi-thread									*/
 	int waited_array_start_index = int(ind) + 1;
-	int each_thread_process_num = ceil((len - waited_array_start_index) / MAX_THREADS);
+	int CURRENT_THREAD_NUM = min(MAX_THREADS, len - waited_array_start_index); // 当前线程数，如果数据量 < MAX_THREADS 不需要开这么多
+	int each_thread_process_num = ceil((len - waited_array_start_index) / CURRENT_THREAD_NUM);
+
 	THREAD_DATA* current_thread_data = new THREAD_DATA[MAX_THREADS];
 	HANDLE hThreads[MAX_THREADS];
 	// 1.1 create thread task
@@ -414,11 +428,13 @@ float maxSpeedUp(const float data[], const int len) {
 	}
 	std::cout << "Satrt WaitForMultipleObjects for 2mins!" << std::endl;
 	DWORD ThreadFinished = WaitForMultipleObjects(MAX_THREADS, hSemaphores, TRUE, 2 * 60 * 1000);
-	if (!((WAIT_OBJECT_0 <= ThreadFinished)  && (ThreadFinished <= (WAIT_OBJECT_0 + MAX_THREADS - 1)))) {
+	if (!((WAIT_OBJECT_0 <= ThreadFinished) && (ThreadFinished <= (WAIT_OBJECT_0 + MAX_THREADS - 1)))) {
 		// exception
 		printf("WARN: thread end exception! ThreadFinished=%d", ThreadFinished);
 		throw std::exception("WARN: getMax thread end exception!");
 	}
+	delete[] current_thread_data;
+
 
 	// 1.3 get result
 	retMax[0] = data[waited_array_start_index];
@@ -435,14 +451,34 @@ float maxSpeedUp(const float data[], const int len) {
 	//3. 整合结果
 	ret = retMax[0] > retMax[1] ? retMax[0] : retMax[1];
 	QueryPerformanceCounter(&end_time);//start 
-	std::cout << "Max SpeedUp: result =" << ret << ", costs = " << 
+	std::cout << "Max SpeedUp: result =" << ret << ", costs = " <<
 		((double)end_time.QuadPart - start_time.QuadPart) / (double)time_freq.QuadPart << "s" << std::endl;
 
 	return ret;
 }
 
 
+// ========================= SORT==============================
 
+void quickSort(float* data, int lowIndex, int highIndex) {
+	int i = lowIndex, j = highIndex;
+	float tmp_data = data[i];
+
+	while (i < j) {
+		while (i < j and data[j] > tmp_data) { j--; };
+		if (i < j) {
+			data[i++] = data[j];
+		}
+		while (i < j and data[i] <= tmp_data) { i++; };
+		if (i < j) {
+			data[j--] = data[i];
+		}
+	}
+	data[i] = tmp_data;
+
+	if (lowIndex < i - 1) { quickSort(data, lowIndex, i - 1); }
+	if (highIndex > i + 1) { quickSort(data, i + 1, highIndex); }
+}
 
 /*
 * 排序算法加速版（单机版）
@@ -470,6 +506,61 @@ float singleSpdSort(const float data[], const int stInd, const int len, float re
 	return 0.0f;
 }
 
+/*
+* 排序 multithread
+*/
+DWORD WINAPI sortArray_multithread(LPVOID lpParameter)
+{
+	THREAD_DATA* threadData = (THREAD_DATA*)lpParameter;
+	int current_array_len = threadData->end_index - threadData->start_index +1;
+	quickSort(sortResultArraySequece[threadData->thread_id], 0, current_array_len - 1); //float** sortResultArraySequece = new float * [Num]
+
+	ReleaseSemaphore(hSemaphores[threadData->thread_id], 1, NULL);//释放信号量，信号量加1 
+	return 0;
+}
+
+
+/* Merge 2 array
+*/
+void merge_2_sorted_array(float* sorted_first_array, int first_array_len, float* sorted_second_array, SORTED_ARRAY_MERGE* sort_result_array) {
+	int second_array_len = _msize(sorted_second_array) / sizeof(sorted_second_array[0]);
+
+	int i = 0, j = 0, total_array_index = 0;
+	while( i < first_array_len && j < second_array_len) {
+		if (sorted_first_array[i] <= sorted_second_array[j]) {
+			sort_result_array->merged_array[total_array_index] = sorted_first_array[i];
+			i++;
+		}
+		else {
+			sort_result_array->merged_array[total_array_index] = sorted_second_array[j];
+			j++;
+		}
+		total_array_index++;
+	}
+	while (i < first_array_len) {
+		sort_result_array->merged_array[total_array_index] = sorted_first_array[i];
+		i++;
+		total_array_index++;
+	}
+	while (j < second_array_len) {
+		sort_result_array->merged_array[total_array_index] = sorted_second_array[j];
+		j++;
+		total_array_index++;
+	}
+
+	sort_result_array->merged_len = first_array_len + second_array_len;
+}
+
+/* check sort result: ascend
+*/
+int check_sorted_result(const float data[], const int len) {
+	for (int i = 0; i < len -1; i++) {
+		if (data[i + 1] < data[i]) 
+			return 0;
+	}
+	return 1;
+}
+
 /**
 * 加速版排序
 * @data 待排序的float一维数组
@@ -477,21 +568,140 @@ float singleSpdSort(const float data[], const int stInd, const int len, float re
 * @return 若正常求解，则返回0.0
 */
 float sortSpeedUp(const float data[], const int len, float result[]) {
+	// TIPS: TCP在单机网上一次最大传输65536字节，即16384个float, 8192个double
+	// 在局域网内根据网卡，一次最大传输1500字节，即375个float, 187个double
 
-	int ind = len / 2;//ind指client段所需计算到的长度（下标+1）
-	float** retSort = new float* [2] { new float[ind], new float[ind] };
-	//0. 发送运算任务给 client
-	send(servConnection, (char*)&ind, sizeof(int), NULL);
-	//然后server端自己算
-	singleSpdSort(data, ind, len - ind, retSort[0]);
-	//接收Client端的结果
-	recv(servConnection, (char*)&retSort[1], ind * sizeof(float), NULL);
+	int firstHafEndIndex = int(floor(len / 2) - 1); //ind指client段所需计算到的下标
+	int secondHalfLen = len - firstHafEndIndex - 1;
 
-	// 整合结果
-	system("pause");
+	float* sortResultArray = new float[len] {0};
+	float* clientResult = new float[firstHafEndIndex + 1] {0};
+	float* serverResult = new float[secondHalfLen] {0};
 
-	//把最终结果返回Client端
-	send(servConnection, (char*)&result, ind * sizeof(float), NULL);
+	// 0. 任务分配
+	send(servConnection, (char*)&firstHafEndIndex, sizeof(int), NULL);
+
+	//1. server 对后一半排序
+	LARGE_INTEGER start_time, end_time, time_freq;
+	QueryPerformanceFrequency(&time_freq);
+	QueryPerformanceCounter(&start_time);//start  
+	int waited_array_start_index = int(firstHafEndIndex) + 1;
+	int each_thread_process_num = int(max(ceil(secondHalfLen / MAX_THREADS), 2)); // 每个线程最少处理2个数据
+	int CURRENT_THREAD_NUM = int(ceil((len - waited_array_start_index) / each_thread_process_num)); // 当前需要的线程数，保证每个线程有数据可以处理
+
+	THREAD_DATA_SORT* current_thread_data = new THREAD_DATA_SORT[CURRENT_THREAD_NUM];
+	HANDLE hThreads[MAX_THREADS];
+	// 1.1 create thread task
+	for (int i = 0; i < MAX_THREADS; i++)
+	{
+		hSemaphores[i] = CreateSemaphore(NULL, 0, 1, NULL);
+		if (i >= CURRENT_THREAD_NUM) { continue; }
+
+		// 线程输入数据
+		current_thread_data[i].thread_id = i;
+		current_thread_data[i].start_index = min(waited_array_start_index + i * each_thread_process_num, len - 1);
+		current_thread_data[i].end_index = min(current_thread_data[i].start_index + each_thread_process_num - 1, len - 1);
+		int current_block_len = current_thread_data[i].end_index - current_thread_data[i].start_index + 1;
+		// cut each block's data
+		sortResultArraySequece[i] = new float[current_block_len];
+		printf("Block No.%d\n", i);
+		for (int tmp_index=0; (tmp_index + current_thread_data[i].start_index) <= current_thread_data[i].end_index; tmp_index++) {
+			sortResultArraySequece[i][tmp_index] = data[tmp_index + current_thread_data[i].start_index];
+			std::cout << sortResultArraySequece[i][tmp_index] << " ";
+		}
+		std::cout << std::endl;
+		
+
+		hThreads[i] = CreateThread(
+			NULL,// default security attributes
+			0,// use default stack size
+			sortArray_multithread,// thread function
+			&current_thread_data[i],// argument to thread function
+			CREATE_SUSPENDED, // use default creation flags.0 means the thread will be run at once  CREATE_SUSPENDED
+			NULL);
+
+		if (hThreads[i] == NULL)
+		{
+			printf("WARN: SORT hThreads=%d CreateThread error: %d\n", i, GetLastError());
+			throw std::exception("WARN: SORT CreateThread error!");
+		}
+	}
+	// 1.2.execute + wait
+	for (int i = 0; i < CURRENT_THREAD_NUM; i++)
+	{
+		ResumeThread(hThreads[i]);
+	}
+	std::cout << "Start WaitForMultipleObjects for 2mins!" << std::endl;
+	DWORD ThreadFinished = WaitForMultipleObjects(CURRENT_THREAD_NUM, hSemaphores, TRUE, 2 * 60 * 1000);
+	if (!((WAIT_OBJECT_0 <= ThreadFinished) && (ThreadFinished <= (WAIT_OBJECT_0 + MAX_THREADS - 1)))) {
+		// exception
+		printf("WARN: thread end exception! ThreadFinished=%d", ThreadFinished);
+		throw std::exception("WARN: getMax thread end exception!");
+	}
+	std::cout << "Sort multihthread Finish!" << std::endl;
+	delete[] current_thread_data;
+	
+	for (int i = 0; i < CURRENT_THREAD_NUM; i++) {
+		int data_len = _msize(sortResultArraySequece[i]) / sizeof(sortResultArraySequece[i][0]);
+		printf("sortResultArraySequece No.%d/%d ,data_len=%d\n", i, CURRENT_THREAD_NUM, data_len);
+		for (int j = 0; j < data_len; j++) {
+			std::cout << sortResultArraySequece[i][j] << " ";
+		}
+		std::cout << std::endl;
+	}
+	
+
+	// 1.3 merge server's result(Current in dumb ways: merge each 2 sequence)
+	SORTED_ARRAY_MERGE* tmp_array_data = new SORTED_ARRAY_MERGE;
+	SORTED_ARRAY_MERGE* merge_result_data = new SORTED_ARRAY_MERGE;
+	tmp_array_data->merged_array = new float[secondHalfLen]{0};
+	tmp_array_data->merged_len = 0;
+	merge_result_data->merged_array = new float[secondHalfLen]{0};
+	merge_result_data->merged_len = 0;
+	if (CURRENT_THREAD_NUM == 1) {
+		// only use one thread could deal with all the data
+		for (int i = 0; i < secondHalfLen; i++) {
+			merge_result_data->merged_array[i] = sortResultArraySequece[0][i];
+		}
+		merge_result_data->merged_len = secondHalfLen;
+	}
+	else {
+		// 多个线程数据
+		int current_merge_array_no = 1;
+		while (current_merge_array_no < CURRENT_THREAD_NUM) {
+			// initialize tmp_array >> merge (tmp_array, sortResultArraySequece[current_merge_array_no])
+			if (current_merge_array_no == 1) {
+				int first_array_len = _msize(sortResultArraySequece[0]) / sizeof(sortResultArraySequece[0][0]);
+				merge_2_sorted_array(sortResultArraySequece[0], first_array_len, sortResultArraySequece[current_merge_array_no], merge_result_data);
+			}
+			else {
+				// merge from last time merge result
+				for (int i = 0; i < merge_result_data->merged_len; i++) {
+					tmp_array_data->merged_array[i] = merge_result_data->merged_array[i];
+				}
+				tmp_array_data->merged_len = merge_result_data->merged_len;
+
+				merge_2_sorted_array(tmp_array_data->merged_array, tmp_array_data->merged_len, sortResultArraySequece[current_merge_array_no], merge_result_data);
+			}
+			current_merge_array_no++;
+		}
+	}
+
+	int sort_success_flag = check_sorted_result(merge_result_data->merged_array, merge_result_data->merged_len);
+	QueryPerformanceCounter(&end_time);//start 
+	std::cout << "Server SORT finished! sort_success=" << sort_success_flag <<
+		", costs = " << ((double)end_time.QuadPart - start_time.QuadPart) / (double)time_freq.QuadPart << "s" << std::endl;
+	for (int i = 0; i < merge_result_data->merged_len; i++) {
+		std::cout << merge_result_data->merged_array[i] << " ";
+	}
+	std::cout << std::endl;
+
+	//2. 接收Client端的结果
+	recv(servConnection, (char*)&clientResult, (firstHafEndIndex + 1) * sizeof(float), NULL);
+
+	//3. 整合结果
+	int total_array_index = 0;
+	int i = 0, j = 0;
 
 	return 0.0;
 }
