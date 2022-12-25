@@ -2,25 +2,12 @@
 * Client端主程序
 */
 
-
-#pragma region macro_definition
-
+#define CLIENT
 #define _WINSOCK_DEPRECATED_NO_WARNINGS//因为用到了过时方法inet_addr()，没这个过不了编译
-#define MAX_THREADS 2 // 64//最大线程数
-#define SUBDATANUM 10 // 80000//各线程处理数据长度（最好是16的倍数）
-#define DATANUM (SUBDATANUM * MAX_THREADS)   /*这个数值是总数据量*/
-#define SERVER_ADDRESS "127.0.0.1"//Server端IP地址
-#define SERVER_PORT 10086
-#define RANDOM_SEED 1
-
-#pragma endregion
-
 
 
 #pragma region header
-
 #include "ServerClientConfig.h"//pch为预编译头文件
-
 #pragma endregion header
 
 
@@ -54,7 +41,6 @@ float sort(const float data[], const int len, float  result[]);//data是原始�
 
 //双机加速版本
 //采取多线程和SSE技术加速
-//TODO:最重要的双机加速没有实现，寄
 int initCltSocket();//初始化Socket
 int closeSocket();//关闭Socket
 float sumSpeedUp(const float data[], const int len); //data是原始数据，len为长度。结果通过函数返回
@@ -77,7 +63,6 @@ int main() {
 	//初始化
 	//数据测试相关
 	srand(RANDOM_SEED);
-	float* rawFloatData = new float[DATANUM];//待测试数据，分别初始化。为了减少heap占用，改为动态内存
 	for (size_t i = 0; i < DATANUM; i++) {//数据初始化
 		rawFloatData[i] = fabs(double(rand()));  // float(i + 1);
 	}
@@ -223,7 +208,7 @@ float sum(const float data[], const int len) {
 	//分块求和
 	for (int i = 0; i < MAX_THREADS; ++i) {
 		int subDataStartIndex = i * subDataNum;
-		int SubDataElementNum = (i+1 == MAX_THREADS) ? (len - subDataStartIndex) : subDataNum; // 判断此块元素个数
+		int SubDataElementNum = (i + 1 == MAX_THREADS) ? (len - subDataStartIndex) : subDataNum; // 判断此块元素个数
 
 		for (int j = 0; j < SubDataElementNum; ++j) {
 			//retSum[i] += log(sqrt(data[j + subDataStartIndex]));  // 模拟任务，增加计算量
@@ -257,7 +242,7 @@ float myMax(const float data[], const int len) {
 =================== SORT =====================
 */
 
-void quickSort(float* data, int lowIndex, int highIndex){
+void quickSort(float* data, int lowIndex, int highIndex) {
 	int i = lowIndex, j = highIndex;
 	double x = data[i];
 
@@ -273,8 +258,8 @@ void quickSort(float* data, int lowIndex, int highIndex){
 	}
 	data[i] = x;
 
-	if (lowIndex < i-1) { quickSort(data, 0, i - 1); }
-	if (highIndex > (i+1)) { quickSort(data, i + 1, highIndex); }
+	if (lowIndex < i - 1) { quickSort(data, 0, i - 1); }
+	if (highIndex > (i + 1)) { quickSort(data, i + 1, highIndex); }
 }
 
 /*
@@ -297,7 +282,7 @@ float sort(const float data[], const int len, float result[]) {
 
 // ================================SUM
 /*
-* Sum : Speed Up Using SSE + OpenMP 
+* Sum : Speed Up Using SSE + OpenMP
 * Func 对数据部分范围 [startIndex，endIndex] 闭区间, 求和。按 8 个数分块，使用SSE 256bit，最后一块不足 8 个对的部分就直接加
 * @data 待求和的float一维数组
 * @stInd
@@ -313,7 +298,7 @@ float SumArray_speedUp(const float data[], const int startIndex, const int endIn
 		std::cout << data[i] << std::endl;
 	}
 
-	
+
 	//SSE加速 
 	int SSE_parallel_num = 8; //float为32bit，则256位可以一次处理256/32=8个float
 	int sse_iter = int(floor(part_array_len / SSE_parallel_num)); // 防止不能整除
@@ -321,21 +306,21 @@ float SumArray_speedUp(const float data[], const int startIndex, const int endIn
 
 	float** retSum = new float* [sse_iter];
 	for (int i = 0; i < sse_iter; ++i) {
-		retSum[i] = new float[SSE_parallel_num]{ 0 };
+		retSum[i] = new float[SSE_parallel_num] { 0 };
 	}
 	float* retSum2 = new float[sse_iter] {0};
 	float ret = 0.0f;
 
-	#pragma omp parallel for//omp多线程加速
+#pragma omp parallel for//omp多线程加速
 	for (int i = 0; i < sse_iter; ++i) {
 		__m256* ptr = (__m256*)stPtr + i * SSE_parallel_num;//每个线程的起始点为 data+i*单个线程循环次数
 		for (int j = 0; j < sse_iter; ++j, ++ptr) {//单个线程循环次数为sse_iter/最大线程数，起始只要保证整数就行
 			//_mm256_store_ps(retSum[i], _mm256_add_ps(*(__m256*)retSum[i], _mm256_log_ps(_mm256_sqrt_ps((*ptr)))));//SSE指令套娃
-			_mm256_store_ps(retSum[i], _mm256_add_ps(*(__m256*)retSum[i] , *ptr));//SSE指令套娃
+			_mm256_store_ps(retSum[i], _mm256_add_ps(*(__m256*)retSum[i], *ptr));//SSE指令套娃
 		}
 	}
 	//整合结果
-	#pragma omp parallel for
+#pragma omp parallel for
 	for (int i = 0; i < sse_iter; ++i) {
 		for (int j = 0; j < SSE_parallel_num; ++j) {
 			retSum2[i] += retSum[i][j];
@@ -350,11 +335,11 @@ float SumArray_speedUp(const float data[], const int startIndex, const int endIn
 	}
 
 	// 处理最后一个未整除的块
-	for (int i = startIndex + sse_iter* SSE_parallel_num; i <= endIndex; ++i) {
+	for (int i = startIndex + sse_iter * SSE_parallel_num; i <= endIndex; ++i) {
 		//ret += log(sqrt(data[i]));
 		std::cout << "data[i]=" << data[i] << "ret=" << ret << std::endl;
 		ret += data[i];
-		
+
 	}
 
 	//回收动态数组内存
@@ -401,7 +386,7 @@ float sumSpeedUp(const float data[], const int len) {
 float singleSpdMax(const float data[], const int stInd, const int len) {
 	//局部变量
 	float ret;
-	float* retMax = new float[8]{ 0 };//用于SSE加速的中间存储
+	float* retMax = new float[8] { 0 };//用于SSE加速的中间存储
 	int sse_iter = len / 8;//SSE迭代总长度
 	const float* stPtr = data + stInd;//偏移后的数组首地址
 	//最大值赋初值
@@ -446,7 +431,7 @@ float maxSpeedUp(const float data[], const int len) {
 	//获得任务分配
 	recv(cltConnection, (char*)&ind, sizeof(int), NULL);
 	//求解分任务
-	ret = myMax(data, ind+1);
+	ret = myMax(data, ind + 1);
 	std::cout << "Current Client Max result = " << ret << std::endl;
 	//把结果发送给Server端整合
 	send(cltConnection, (char*)&ret, sizeof(ret), NULL);
@@ -500,8 +485,8 @@ float singleSpdSort(const float data[], const int stInd, const int len, float re
 
 boolean checkSortedArray(const float data[], const int len) {
 
-	for (int i = 0; i < len-1; i++) {
-		if (data[i] > data[i+1]) {
+	for (int i = 0; i < len - 1; i++) {
+		if (data[i] > data[i + 1]) {
 			return FALSE;
 		}
 	}
@@ -519,7 +504,7 @@ float sortSpeedUp(const float data[], const int len, float result[]) {
 	int ind;
 	enum Method mtd = Method::MT_SORT;//请求类型为max方法
 	//0. 向Server端发送分布运算请求
-	 send(cltConnection, (char*)&mtd, sizeof(Method), NULL);
+	send(cltConnection, (char*)&mtd, sizeof(Method), NULL);
 	//1. 获得任务分配
 	recv(cltConnection, (char*)&ind, sizeof(int), NULL);
 
