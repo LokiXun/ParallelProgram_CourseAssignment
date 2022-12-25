@@ -310,28 +310,6 @@ float maxSpeedUp(const float data[], const int len) {
 
 
 // ========================= SORT==============================
-
-void quickSort(float* data, int lowIndex, int highIndex) {
-	int i = lowIndex, j = highIndex;
-	float tmp_data = data[i];
-
-	while (i < j) {
-		while (i < j and data[j] > tmp_data) { j--; };
-		if (i < j) {
-			data[i++] = data[j];
-		}
-		while (i < j and data[i] <= tmp_data) { i++; };
-		if (i < j) {
-			data[j--] = data[i];
-		}
-	}
-	data[i] = tmp_data;
-
-	if (lowIndex < i - 1) { quickSort(data, lowIndex, i - 1); }
-	if (highIndex > i + 1) { quickSort(data, i + 1, highIndex); }
-
-}
-
 /*
 * 排序 multithread
 */
@@ -351,45 +329,6 @@ DWORD WINAPI sortArray_multithread(LPVOID lpParameter)
 }
 
 
-/* Merge 2 array
-*/
-void merge_2_sorted_array(float* sorted_first_array, int first_array_len, float* sorted_second_array, int second_array_len, SORTED_ARRAY_MERGE* sort_result_array) {
-
-	int i = 0, j = 0, total_array_index = 0;
-	while (i < first_array_len && j < second_array_len) {
-		if (sorted_first_array[i] <= sorted_second_array[j]) {
-			sort_result_array->merged_array[total_array_index] = sorted_first_array[i];
-			i++;
-		}
-		else {
-			sort_result_array->merged_array[total_array_index] = sorted_second_array[j];
-			j++;
-		}
-		total_array_index++;
-	}
-	while (i < first_array_len) {
-		sort_result_array->merged_array[total_array_index] = sorted_first_array[i];
-		i++;
-		total_array_index++;
-	}
-	while (j < second_array_len) {
-		sort_result_array->merged_array[total_array_index] = sorted_second_array[j];
-		j++;
-		total_array_index++;
-	}
-	sort_result_array->merged_len = first_array_len + second_array_len;
-
-}
-
-// check sort result: ascend
-int check_sorted_result(const float data[], const int len) {
-	for (int i = 0; i < len - 1; i++) {
-		if (data[i + 1] < data[i])
-			return 0;
-	}
-	return 1;
-}
-
 /**
 * 加速版排序
 * @data 待排序的float一维数组
@@ -400,7 +339,7 @@ float sortSpeedUp(const float data[], const int len, float result[]) {
 	// TIPS: TCP在单机网上一次最大传输65536字节，即16384个float, 8192个double
 	// 在局域网内根据网卡，一次最大传输1500字节，即375个float, 187个double
 
-	int firstHalfLen = MAX_THREADS * CLIENT_SUBDATANUM; // client 计算前面一部分
+	int firstHalfLen = MAX_THREADS * CLIENT_SUBDATANUM; // client 计算前面一部分数据长度
 	int secondHalfLen = MAX_THREADS * SERVER_SUBDATANUM;
 	
 	// 0. 任务分配
@@ -463,7 +402,7 @@ float sortSpeedUp(const float data[], const int len, float result[]) {
 	// 1.3 merge server's result(Current in dumb ways: merge each 2 sequence)
 	SORTED_ARRAY_MERGE* tmp_array_data = new SORTED_ARRAY_MERGE;
 	SORTED_ARRAY_MERGE* merge_result_data = new SORTED_ARRAY_MERGE;
-	tmp_array_data->merged_array = new float[SERVER_SUBDATANUM] {0};
+	tmp_array_data->merged_array = new float[SERVER_DATANUM] {0};
 	tmp_array_data->merged_len = 0;
 	merge_result_data->merged_array = ServerSortMergedResult;
 	merge_result_data->merged_len = 0;
@@ -488,8 +427,8 @@ float sortSpeedUp(const float data[], const int len, float result[]) {
 		}
 		current_merge_thread_index++;
 	}
-	//delete[] tmp_array_data->merged_array;
-	//delete tmp_array_data;
+	delete[] tmp_array_data->merged_array;
+	delete tmp_array_data;
 
 	int sort_success_flag = check_sorted_result(merge_result_data->merged_array, merge_result_data->merged_len);
 	QueryPerformanceCounter(&end_time);//start 
@@ -572,8 +511,12 @@ int main() {
 	int lpFlag = 0;
 	enum Method mtd = Method::WAIT;
 	while (lpFlag == 0) {
-		recv(servConnection, (char*)&mtd, sizeof(int), NULL);//接收指令
-		cout << "Client message received.";
+		if ((recv_len = recv(servConnection, (char*)&mtd, sizeof(int), NULL)) < 0)	//接收指令
+		{
+			printf("receive result failed...\r\n");
+			return -1;
+		}
+		//cout << "Client message received.";
 		switch (mtd) {
 		case Method::MT_SUM:
 			cout << "Testing sumSpeedup  method..." << endl;

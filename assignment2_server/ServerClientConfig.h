@@ -60,11 +60,9 @@ float finalMaxResult;                    // 求最大值最终结果
 
 // sort result
 float SortTotalResult[DATANUM];             // server+client 最终排序结果
-#ifdef SERVER
 float ServerSortResult[MAX_THREADS][SERVER_SUBDATANUM];     // Server 各块排序结果
 float ServerSortMergedResult[SERVER_DATANUM];
 float ClientSortResult[CLIENT_DATANUM];
-#endif
 
 
 // Other
@@ -94,6 +92,75 @@ typedef struct merge_sorted_array {
 	float* merged_array;
 	int merged_len;
 } SORTED_ARRAY_MERGE;
+
+
+
+
+
+
+// ========================= SORT==============================
+
+void quickSort(float* data, int lowIndex, int highIndex) {
+	int i = lowIndex, j = highIndex;
+	float tmp_data = data[i];
+
+	while (i < j) {
+		while (i < j and data[j] > tmp_data) { j--; };
+		if (i < j) {
+			data[i++] = data[j];
+		}
+		while (i < j and data[i] <= tmp_data) { i++; };
+		if (i < j) {
+			data[j--] = data[i];
+		}
+	}
+	data[i] = tmp_data;
+
+	if (lowIndex < i - 1) { quickSort(data, lowIndex, i - 1); }
+	if (highIndex > i + 1) { quickSort(data, i + 1, highIndex); }
+
+}
+
+
+/* Merge 2 array
+*/
+void merge_2_sorted_array(float* sorted_first_array, int first_array_len, float* sorted_second_array, int second_array_len, SORTED_ARRAY_MERGE* sort_result_array) {
+
+	int i = 0, j = 0, total_array_index = 0;
+	while (i < first_array_len && j < second_array_len) {
+		if (sorted_first_array[i] <= sorted_second_array[j]) {
+			sort_result_array->merged_array[total_array_index] = sorted_first_array[i];
+			i++;
+		}
+		else {
+			sort_result_array->merged_array[total_array_index] = sorted_second_array[j];
+			j++;
+		}
+		total_array_index++;
+	}
+	while (i < first_array_len) {
+		sort_result_array->merged_array[total_array_index] = sorted_first_array[i];
+		i++;
+		total_array_index++;
+	}
+	while (j < second_array_len) {
+		sort_result_array->merged_array[total_array_index] = sorted_second_array[j];
+		j++;
+		total_array_index++;
+	}
+	sort_result_array->merged_len = first_array_len + second_array_len;
+
+}
+
+// check sort result: ascend
+int check_sorted_result(const float data[], const int len) {
+	for (int i = 0; i < len - 1; i++) {
+		if (data[i + 1] < data[i])
+			return 0;
+	}
+	return 1;
+}
+
 
 
 #endif

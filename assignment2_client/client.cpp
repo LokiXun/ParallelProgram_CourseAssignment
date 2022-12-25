@@ -4,150 +4,43 @@
 
 #define CLIENT
 #define _WINSOCK_DEPRECATED_NO_WARNINGS//因为用到了过时方法inet_addr()，没这个过不了编译
-
-
-#pragma region header
 #include "ServerClientConfig.h"//pch为预编译头文件
-#pragma endregion header
-
 
 
 #pragma region global_variable
-//SSE加速的方法共享同一网络连接
-//我想通过连接当参数传入来实现封装，但是老师把函数参数定死了，就只能用全局变量了
-
 WSAData wsaData;//socket库信息
 WORD dllVersion;//dllVersion信息
 SOCKADDR_IN addr;//网络地址信息
 int addrlen = sizeof(addr);//addr数据长度
 SOCKET cltConnection;//cltConnection为服务端连接
-enum class Method {//用来分情况切换所测试的函数方法
-	MT_SUM = 1,
-	MT_MAX = 2,
-	MT_SORT = 3,
-	END = 9
-};
-
+HANDLE hSemaphores[MAX_THREADS];//信号量，保证不重入。等同于mutex】
 #pragma endregion
 
 
 
-#pragma region method_declaraion
-//单机版
-//不采取任何加速手段
-float sum(const float data[], const int len); //data是原始数据，len为长度。结果通过函数返回
-float myMax(const float data[], const int len);//data是原始数据，len为长度。结果通过函数返回
-float sort(const float data[], const int len, float  result[]);//data是原始数据，len为长度。排序结果在result中。
-
-//双机加速版本
-//采取多线程和SSE技术加速
-int initCltSocket();//初始化Socket
-int closeSocket();//关闭Socket
-float sumSpeedUp(const float data[], const int len); //data是原始数据，len为长度。结果通过函数返回
-float maxSpeedUp(const float data[], const int len);//data是原始数据，len为长度。结果通过函数返回
-float sortSpeedUp(const float data[], const int len, float result[]);//data是原始数据，len为长度。排序结果在result中。
-void quickSort(float* data, int lowIndex, int highIndex);
-
-//用于测试的函数
-float test(float method(const float*, int), float data[], int len);
-float test(float method(const float*, int, float*), float data[], int len, float result[]);
-
-#pragma endregion
-
-
-
-//主函数
-int main() {
-	using namespace std;
-
-	//初始化
-	//数据测试相关
-	srand(RANDOM_SEED);
-	for (size_t i = 0; i < DATANUM; i++) {//数据初始化
-		rawFloatData[i] = fabs(double(rand()));  // float(i + 1);
-	}
-	for (size_t i = 0; i < min(DATANUM, 10); i++) {
-		std::cout << rawFloatData[i] << " ";
-	}
-	std::cout << std::endl;
-
-	float* result = new float[DATANUM];
-	//流程控制
-	int lpFlag;//循环控制Flag
-	string cmd;//存储用户输入
-	map<string, Method> cmdMap;//根据用户输入字符映射枚举
-	cmdMap["sum"] = Method::MT_SUM;
-	cmdMap["max"] = Method::MT_MAX;
-	cmdMap["sort"] = Method::MT_SORT;
-
-	//初始化网络连接
-	initCltSocket();
+//#pragma region method_declaraion
+////单机版
+////不采取任何加速手段
+//float sum(const float data[], const int len); //data是原始数据，len为长度。结果通过函数返回
+//float myMax(const float data[], const int len);//data是原始数据，len为长度。结果通过函数返回
+//float sort(const float data[], const int len, float  result[]);//data是原始数据，len为长度。排序结果在result中。
+//
+////双机加速版本
+////采取多线程和SSE技术加速
+//int initCltSocket();//初始化Socket
+//int closeSocket();//关闭Socket
+//float sumSpeedUp(const float data[], const int len); //data是原始数据，len为长度。结果通过函数返回
+//float maxSpeedUp(const float data[], const int len);//data是原始数据，len为长度。结果通过函数返回
+//float sortSpeedUp(const float data[], const int len, float result[]);//data是原始数据，len为长度。排序结果在result中。
+//void quickSort(float* data, int lowIndex, int highIndex);
+//
+////用于测试的函数
+//float test(float method(const float*, int), float data[], int len);
+//float test(float method(const float*, int, float*), float data[], int len, float result[]);
+//
+//#pragma endregion
 
 
-
-	//测试循环
-	lpFlag = 0;
-	while (lpFlag == 0) {
-
-		//要求用户输入需要测试的函数
-		std::cout << "Please input the method you want test: " << endl;
-		std::cout << "sum|max|sort" << endl;
-		std::cin >> cmd;
-
-
-		//从cmdMap中得到映射
-		auto iter = cmdMap.find(cmd);
-		if (iter == cmdMap.end()) {//检查是否有此命令
-			std::cout << "Method " << cmd << " does't exist." << endl;
-			continue;//没有就直接跳进下一个循环重新输入
-		}
-		enum Method mtd = iter->second;
-
-
-		//根据命令映射调用不同的方法进行测试
-		switch (mtd) {
-		case Method::MT_SUM:
-			std::cout << "Testing sum method..." << endl;
-			test(sum, rawFloatData, DATANUM);
-			std::cout << "Testing sumSpeedUp method..." << endl;
-			test(sumSpeedUp, rawFloatData, DATANUM);
-			break;
-		case Method::MT_MAX:
-			std::cout << "Testing max method..." << endl;
-			test(myMax, rawFloatData, DATANUM);
-			std::cout << "Testing maxSpeedUp method..." << endl;
-			test(maxSpeedUp, rawFloatData, DATANUM);
-			break;
-		case Method::MT_SORT:
-			std::cout << "Testing sort method..." << endl;
-			test(sort, rawFloatData, DATANUM, result);
-			std::cout << "Testing sortSpeedUp method..." << endl;
-			test(sortSpeedUp, rawFloatData, DATANUM, result);
-			break;
-		default:
-			break;
-		}
-
-		//询问用户是否继续测试
-		std::cout << "Continue to test? " << endl;
-		std::cout << "Input N to end/Input anything other to continue." << endl;
-		std::cin >> cmd;
-		if (cmd == "N") {
-			lpFlag = -1;
-			mtd = Method::END;
-			send(cltConnection, (char*)&mtd, sizeof(Method), NULL);
-		}
-		std::cout << endl;
-	}
-
-
-	//关闭网络连接
-	closeSocket();
-
-	//回收动态数组内存
-
-
-}
 
 
 #pragma region method_defination
@@ -241,26 +134,6 @@ float myMax(const float data[], const int len) {
 /*
 =================== SORT =====================
 */
-
-void quickSort(float* data, int lowIndex, int highIndex) {
-	int i = lowIndex, j = highIndex;
-	double x = data[i];
-
-	while (i < j) {
-		while (i < j and x <= data[j]) { j--; };
-		if (i < j) {
-			data[i++] = data[j];
-		}
-		while (i < j and data[i] < data[j]) { i++; };
-		if (i < j) {
-			data[j--] = data[i];
-		}
-	}
-	data[i] = x;
-
-	if (lowIndex < i - 1) { quickSort(data, 0, i - 1); }
-	if (highIndex > (i + 1)) { quickSort(data, i + 1, highIndex); }
-}
 
 /*
 * sort函数采用快排
@@ -443,6 +316,21 @@ float maxSpeedUp(const float data[], const int len) {
 	return ret;
 }
 
+// ============================================ SORT
+DWORD WINAPI sortArray_multithread(LPVOID lpParameter)
+{
+	THREAD_DATA_SORT* threadData = (THREAD_DATA_SORT*)lpParameter;
+	//float* data = new float[threadData->block_data_len];
+
+	int end_index = threadData->start_index + threadData->block_data_len;
+	for (int new_index = 0, i = threadData->start_index; i < end_index; i++, new_index++) {
+		ClientSortResult[threadData->thread_id][new_index] = rawFloatData[i];
+	}
+	quickSort(ClientSortResult[threadData->thread_id], 0, threadData->block_data_len - 1);  // void quickSort(float* data, int lowIndex, int highIndex) 
+
+	ReleaseSemaphore(hSemaphores[threadData->thread_id], 1, NULL);//释放信号量，信号量加1 
+	return 0;
+}
 
 
 /*
@@ -483,46 +371,116 @@ float singleSpdSort(const float data[], const int stInd, const int len, float re
 	return 0.0f;
 }
 
-boolean checkSortedArray(const float data[], const int len) {
-
-	for (int i = 0; i < len - 1; i++) {
-		if (data[i] > data[i + 1]) {
-			return FALSE;
-		}
-	}
-	return TRUE;
-}
-
 /*
-* 排序算法加速版
+* 双机排序
 * @data 待求和的float一维数组
 * @len float数组长度
 * @return 数组data排序后的结果
 */
 float sortSpeedUp(const float data[], const int len, float result[]) {
-	float ret;
-	int ind;
+	int firstHalfLen; // 数据长度, client 处理前一部分数据，
 	enum Method mtd = Method::MT_SORT;//请求类型为max方法
 	//0. 向Server端发送分布运算请求
 	send(cltConnection, (char*)&mtd, sizeof(Method), NULL);
 	//1. 获得任务分配
-	recv(cltConnection, (char*)&ind, sizeof(int), NULL);
+	recv(cltConnection, (char*)&firstHalfLen, sizeof(int), NULL);
+	printf("CLIENT Receve SORT Task, Num=%d\n", firstHalfLen);
 
-	//2. 排序
-	sort(data, len, result);
-	std::cout << "Client sort result=";
-	for (int i = 0; i < len; i++) {
-		std::cout << data[i] << " ";
+	//2. client 对前一半数据排序
+	LARGE_INTEGER start_time, end_time, time_freq;
+	QueryPerformanceFrequency(&time_freq);
+	QueryPerformanceCounter(&start_time);
+
+	THREAD_DATA_SORT* current_thread_data = new THREAD_DATA_SORT[MAX_THREADS]; // MAX_THREADS 个数据块
+	HANDLE hThreads[MAX_THREADS];
+	// 1.1 create thread task
+	for (int thread_index = 0; thread_index < MAX_THREADS; thread_index++)
+	{
+		hSemaphores[thread_index] = CreateSemaphore(NULL, 0, 1, NULL);
+		// 线程输入数据
+		current_thread_data[thread_index].thread_id = thread_index;
+		current_thread_data[thread_index].start_index = thread_index * CLIENT_SUBDATANUM;	// index in origin rawData
+		current_thread_data[thread_index].block_data_len = CLIENT_SUBDATANUM;  // [start, end)
+
+		hThreads[thread_index] = CreateThread(
+			NULL,// default security attributes
+			0,// use default stack size
+			sortArray_multithread,// thread function
+			&current_thread_data[thread_index],// argument to thread function
+			CREATE_SUSPENDED, // use default creation flags.0 means the thread will be run at once  CREATE_SUSPENDED
+			NULL);
+
+		if (hThreads[thread_index] == NULL)
+		{
+			printf("WARN: SORT hThreads=%d CreateThread error: %d\n", thread_index, GetLastError());
+			throw std::exception("WARN: SORT CreateThread error!");
+		}
+	}
+	// 1.2.execute + wait
+	for (int i = 0; i < MAX_THREADS; i++)
+	{
+		ResumeThread(hThreads[i]);
+	}
+	std::cout << "Start WaitForMultipleObjects for 2mins!" << std::endl;
+	DWORD ThreadFinished = WaitForMultipleObjects(MAX_THREADS, hSemaphores, TRUE, 2 * 60 * 1000);
+	if (!((WAIT_OBJECT_0 <= ThreadFinished) && (ThreadFinished <= (WAIT_OBJECT_0 + MAX_THREADS - 1)))) {
+		// exception
+		printf("WARN: thread end exception! ThreadFinished=%d", ThreadFinished);
+		throw std::exception("WARN: getMax thread end exception!");
+	}
+	std::cout << "Sort multihthread Finish!" << std::endl;
+
+	for (int thread_index = 0; thread_index < MAX_THREADS; thread_index++) {
+		printf("sortResultArraySequece No.%d/%d ,data_len=%d\n", thread_index, MAX_THREADS, CLIENT_DATANUM);
+		for (int i = 0; i < current_thread_data[thread_index].block_data_len; i++) {
+			std::cout << ClientSortResult[thread_index][i] << " ";
+		}
+		std::cout << std::endl;
+	}
+
+
+	// 1.3 merge server's result(Current in dumb ways: merge each 2 sequence)
+	SORTED_ARRAY_MERGE* tmp_array_data = new SORTED_ARRAY_MERGE;
+	SORTED_ARRAY_MERGE* merge_result_data = new SORTED_ARRAY_MERGE;
+	tmp_array_data->merged_array = new float[CLIENT_DATANUM] {0};
+	tmp_array_data->merged_len = 0;
+	merge_result_data->merged_array = ClientSortMergedResult;
+	merge_result_data->merged_len = 0;
+
+	// 多个线程数据
+	int current_merge_thread_index = 1;
+	while (current_merge_thread_index < MAX_THREADS) {
+		// initialize tmp_array >> merge (tmp_array, sortResultArraySequece[current_merge_array_no])
+		if (current_merge_thread_index == 1) {
+			int first_array_len = CLIENT_SUBDATANUM;
+			merge_2_sorted_array(ClientSortResult[0], first_array_len, ClientSortResult[current_merge_thread_index], SERVER_SUBDATANUM, merge_result_data);
+		}
+		else {
+			// merge from last time merge result
+			for (int i = 0; i < merge_result_data->merged_len; i++) {
+				tmp_array_data->merged_array[i] = merge_result_data->merged_array[i];
+			}
+			tmp_array_data->merged_len = merge_result_data->merged_len;
+
+			merge_2_sorted_array(tmp_array_data->merged_array, tmp_array_data->merged_len,
+				ClientSortResult[current_merge_thread_index], SERVER_SUBDATANUM, merge_result_data);
+		}
+		current_merge_thread_index++;
+	}
+	delete[] tmp_array_data->merged_array;
+	delete tmp_array_data;
+
+	int sort_success_flag = check_sorted_result(merge_result_data->merged_array, merge_result_data->merged_len);
+	QueryPerformanceCounter(&end_time);//start 
+	std::cout << "CLIENT SORT finished! sort_success=" << sort_success_flag <<
+		", costs = " << ((double)end_time.QuadPart - start_time.QuadPart) / (double)time_freq.QuadPart << "s" << std::endl;
+	for (int i = 0; i < min(CLIENT_DATANUM, 10); i++) {
+		std::cout << ClientSortMergedResult[i] << " ";
 	}
 	std::cout << std::endl;
-	// check
-	checkSortedArray(data, len);
 
 	//3. 把结果发送给Server端整合
-	/*
-	* TIPS: TCP在单机网上一次最大传输65536字节，即16384个float, 8192个double
-	* 在局域网内根据网卡，一次最大传输1500字节，即375个float, 187个double
-	*/
+	//TODO
 
 	std::cout << "Send2Server success!" << std::endl;
 
@@ -557,6 +515,98 @@ float test(float method(const float*, int, float*), float data[], int len, float
 }
 
 
+
+//主函数
+int main() {
+	using namespace std;
+
+	//初始化
+	//数据测试相关
+	srand(RANDOM_SEED);
+	for (size_t i = 0; i < DATANUM; i++) {//数据初始化
+		rawFloatData[i] = fabs(double(rand()));  // float(i + 1);
+	}
+	for (size_t i = 0; i < min(DATANUM, 10); i++) {
+		std::cout << rawFloatData[i] << " ";
+	}
+	std::cout << std::endl;
+
+	float* result = new float[DATANUM];
+	//流程控制
+	int lpFlag;//循环控制Flag
+	string cmd;//存储用户输入
+	map<string, Method> cmdMap;//根据用户输入字符映射枚举
+	cmdMap["sum"] = Method::MT_SUM;
+	cmdMap["max"] = Method::MT_MAX;
+	cmdMap["sort"] = Method::MT_SORT;
+
+	//初始化网络连接
+	initCltSocket();
+
+
+
+	//测试循环
+	lpFlag = 0;
+	while (lpFlag == 0) {
+
+		//要求用户输入需要测试的函数
+		std::cout << "Please input the method you want test: " << endl;
+		std::cout << "sum|max|sort" << endl;
+		std::cin >> cmd;
+
+
+		//从cmdMap中得到映射
+		auto iter = cmdMap.find(cmd);
+		if (iter == cmdMap.end()) {//检查是否有此命令
+			std::cout << "Method " << cmd << " does't exist." << endl;
+			continue;//没有就直接跳进下一个循环重新输入
+		}
+		enum Method mtd = iter->second;
+
+
+		//根据命令映射调用不同的方法进行测试
+		switch (mtd) {
+		case Method::MT_SUM:
+			std::cout << "Testing sum method..." << endl;
+			test(sum, rawFloatData, DATANUM);
+			std::cout << "Testing sumSpeedUp method..." << endl;
+			test(sumSpeedUp, rawFloatData, DATANUM);
+			break;
+		case Method::MT_MAX:
+			std::cout << "Testing max method..." << endl;
+			test(myMax, rawFloatData, DATANUM);
+			std::cout << "Testing maxSpeedUp method..." << endl;
+			test(maxSpeedUp, rawFloatData, DATANUM);
+			break;
+		case Method::MT_SORT:
+			std::cout << "Testing sort method..." << endl;
+			test(sort, rawFloatData, DATANUM, result);
+			std::cout << "Testing sortSpeedUp method..." << endl;
+			test(sortSpeedUp, rawFloatData, DATANUM, result);
+			break;
+		default:
+			break;
+		}
+
+		//询问用户是否继续测试
+		std::cout << "Continue to test? " << endl;
+		std::cout << "Input N to end/Input anything other to continue." << endl;
+		std::cin >> cmd;
+		if (cmd == "N") {
+			lpFlag = -1;
+			mtd = Method::END;
+			send(cltConnection, (char*)&mtd, sizeof(Method), NULL);
+		}
+		std::cout << endl;
+	}
+
+
+	//关闭网络连接
+	closeSocket();
+
+	return 0;
+
+}
 
 
 #pragma endregion
