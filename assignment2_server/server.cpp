@@ -434,7 +434,7 @@ float sortSpeedUp(const float data[], const int len, float result[]) {
 	QueryPerformanceCounter(&end_time);//start 
 	std::cout << "Server SORT finished! sort_success=" << sort_success_flag <<
 		", costs = " << ((double)end_time.QuadPart - start_time.QuadPart) / (double)time_freq.QuadPart << "s" << std::endl;
-	for (int i = 0; i < min(secondHalfLen, 10); i++) {
+	for (int i = 0; i < min(SERVER_DATANUM,10); i++) {
 		std::cout << ServerSortMergedResult[i] << " ";
 	}
 	std::cout << std::endl;
@@ -445,43 +445,52 @@ float sortSpeedUp(const float data[], const int len, float result[]) {
 	sprintf_s(buf, "Come on!");
 	while ((send_len = send(servConnection, buf, strlen(buf), 0)) < 0) {
 		printf("server send getSortResult request failed...sleep for 10s...\r\n");
-		Sleep(10 * 1000); // sleep 10s
+		Sleep(1 * 1000); // sleep 1s
 	}
-
 	printf("# Send: Come on!\r\n");
+
 	// 2.2 每 1k 收数据
-	float* clinet_sort_result = ClientSortResult;
+	float* clinet_sort_result = ClientSortMergedResult;
 	for (int i = 0; i < S_TIMES; i++)
 	{
-		if ((recv_len = recv(servConnection, (char*)&clinet_sort_result, S_ONCE * sizeof(float), 0)) < 0)
+		if ((recv_len = recv(servConnection, (char*)clinet_sort_result, S_ONCE * sizeof(float), 0)) < 0)
 		{
 			printf("receive client result failed...\r\n");
 			return -1;
 		}
-		printf("%d, %f\r\n", recv_len, *clinet_sort_result);
+		//printf("%d, %f\r\n", recv_len, *clinet_sort_result);
 		clinet_sort_result += S_ONCE;
 	}
 	// process remained data
 	if (S_LEFT)
 	{
-		if ((recv_len = recv(servConnection, (char*)&clinet_sort_result, S_LEFT * sizeof(float), 0)) < 0)
+		if ((recv_len = recv(servConnection, (char*)clinet_sort_result, S_LEFT * sizeof(float), 0)) < 0)
 		{
 			printf("receive result failed...\r\n");
 			return -1;
 		}
-		printf("%d, %f\r\n", recv_len, *clinet_sort_result);
+		//printf("%d, %f\r\n", recv_len, *clinet_sort_result);
 	}
+	printf("CLIENT RECEVIED RESULT:");
+	for (int i = 0; i < min(CLIENT_DATANUM,10); i++) {
+		std::cout << ClientSortMergedResult[i] << " ";
+	}
+	std::cout << std::endl;
+
 
 	//3. server & client 整合结果
-	SORTED_ARRAY_MERGE* merge_server_client = new SORTED_ARRAY_MERGE;
-	merge_server_client->merged_array = SortTotalResult;
-	merge_server_client->merged_len = 0;
-	merge_2_sorted_array(ClientSortResult, CLIENT_DATANUM, ServerSortMergedResult, SERVER_SUBDATANUM, merge_result_data);
+	SORTED_ARRAY_MERGE* merge_total_result_server_client = new SORTED_ARRAY_MERGE;
+	merge_total_result_server_client->merged_array = result;
+	merge_total_result_server_client->merged_len = 0;
+	merge_2_sorted_array(ClientSortMergedResult, CLIENT_DATANUM, ServerSortMergedResult, SERVER_DATANUM, merge_total_result_server_client);
 
 	QueryPerformanceCounter(&end_time);//start 
-	sort_success_flag = check_sorted_result(merge_result_data->merged_array, merge_result_data->merged_len);
+	sort_success_flag = check_sorted_result(merge_total_result_server_client->merged_array, merge_total_result_server_client->merged_len);
 	printf("Multi-PC-multi-thread[SORT](Server): answer = %d, time = %f us\r\n", sort_success_flag, ((double)end_time.QuadPart - start_time.QuadPart) / (double)time_freq.QuadPart);
-
+	for (int i = 0; i < min(DATANUM, 10); i++) {
+		std::cout << result[i] << " ";
+	}
+	std::cout << std::endl;
 	return 0.0;
 }
 
@@ -499,7 +508,7 @@ int main() {
 	}
 	float ret = 0.0f;
 
-	for (size_t i = 0; i < min(DATANUM, 10); i++) {
+	for (size_t i = 0; i < min(DATANUM, 30); i++) {
 		std::cout << rawFloatData[i] << " ";
 	}
 	std::cout << std::endl;

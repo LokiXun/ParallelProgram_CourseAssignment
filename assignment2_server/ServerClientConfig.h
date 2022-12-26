@@ -26,7 +26,7 @@
 
 // Data: 数据分为MAX_THREADS=64 块，每块SUBDATANUM个数据。整体数据分为两半，client处理前一半数据 （64*CLIENT_SUBDATANUM），server处理后一半数据（64*SERVER_SUBDATANUM）
 #define MAX_THREADS     3          // 线程数：64
-#define SUBDATANUM      20     // 子块数据量：2000000
+#define SUBDATANUM      20     // 子块数据量：2000000  tips: 生成随机数，有很多0，ok的
 #define DATANUM         (SUBDATANUM*MAX_THREADS)  // 总数据量：线程数x子块数据量
 #define SERVER_SUBDATANUM  10     // gaurantee SERVER_SUBDATANUM+CLIENT_SUBDATANUM == SUBDATANUM
 #define CLIENT_SUBDATANUM  10    // 单PC数据：1000000
@@ -38,7 +38,7 @@
 #define SERVER_ADDRESS "127.0.0.1"//Server端IP地址
 #define SERVER_PORT 12341
 
-#define S_ONCE              100                         // 一次发送100个double
+#define S_ONCE              100                         // 一次发送100个float
 #define S_TIMES             (CLIENT_DATANUM / S_ONCE)      // 总共发送100个的次数
 #define S_LEFT              (CLIENT_DATANUM % S_ONCE)      // 发送剩余不足的数据
 #define BUF_LEN				1024            // 文字缓存长度：1kB
@@ -59,10 +59,15 @@ float finalMaxResult;                    // 求最大值最终结果
 
 
 // sort result
+#ifdef SERVER
 float SortTotalResult[DATANUM];             // server+client 最终排序结果
 float ServerSortResult[MAX_THREADS][SERVER_SUBDATANUM];     // Server 各块排序结果
 float ServerSortMergedResult[SERVER_DATANUM];
-float ClientSortResult[CLIENT_DATANUM];
+#endif
+#ifdef CLIENT
+float ClientSortResult[MAX_THREADS][SERVER_SUBDATANUM];
+#endif
+float ClientSortMergedResult[CLIENT_DATANUM];	// client 排序结果（server，client 端均需要）
 
 
 // Other

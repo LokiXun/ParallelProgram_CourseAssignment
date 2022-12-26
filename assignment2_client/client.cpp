@@ -13,7 +13,8 @@ WORD dllVersion;//dllVersion信息
 SOCKADDR_IN addr;//网络地址信息
 int addrlen = sizeof(addr);//addr数据长度
 SOCKET cltConnection;//cltConnection为服务端连接
-HANDLE hSemaphores[MAX_THREADS];//信号量，保证不重入。等同于mutex】
+HANDLE hSemaphores[MAX_THREADS];//信号量，保证不重入。等同于mutex
+int ret, recv_len, send_len, sin_size; // 一些网络收发相关变量
 #pragma endregion
 
 
@@ -480,8 +481,33 @@ float sortSpeedUp(const float data[], const int len, float result[]) {
 	std::cout << std::endl;
 
 	//3. 把结果发送给Server端整合
-	//TODO
+	memset(buf, 0, BUF_LEN);
+	printf("client Start waiting for server's request...\r\n");
+	while ((recv_len = recv(cltConnection, buf, BUF_LEN, 0)) < 0) {}
+	printf("Receve SendingResult Request from Server! msg=%s\n ", buf);
 
+	float* client_sort_reuslt_pointer = ClientSortMergedResult;
+	for (int i = 0; i < S_TIMES; i++)
+	{
+		if ((send_len = send(cltConnection, (char *)client_sort_reuslt_pointer, S_ONCE * sizeof(float), 0)) < 0)
+		{
+			printf("send result failed...\r\n");
+			return -1;
+		}
+		 //printf("%d, %f\r\n", send_len, *client_sort_reuslt_pointer);
+		client_sort_reuslt_pointer += S_ONCE;
+	}
+	if (S_LEFT)
+	{
+		if ((send_len = send(cltConnection, (char*)client_sort_reuslt_pointer, S_LEFT * sizeof(float), 0)) < 0)
+		{
+			//printf("send result failed...\r\n");
+			return -1;
+		}
+		printf("%d, %f\r\n", send_len, *client_sort_reuslt_pointer);
+		
+	}
+	printf("Client sort result send successfully!\r\n");
 	std::cout << "Send2Server success!" << std::endl;
 
 	return 0.0f;
@@ -543,8 +569,6 @@ int main() {
 	//初始化网络连接
 	initCltSocket();
 
-
-
 	//测试循环
 	lpFlag = 0;
 	while (lpFlag == 0) {
@@ -579,8 +603,8 @@ int main() {
 			test(maxSpeedUp, rawFloatData, DATANUM);
 			break;
 		case Method::MT_SORT:
-			std::cout << "Testing sort method..." << endl;
-			test(sort, rawFloatData, DATANUM, result);
+			//std::cout << "Testing sort method..." << endl;
+			//test(sort, rawFloatData, DATANUM, result);
 			std::cout << "Testing sortSpeedUp method..." << endl;
 			test(sortSpeedUp, rawFloatData, DATANUM, result);
 			break;
