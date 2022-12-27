@@ -119,6 +119,7 @@ int main(int argc, char const *argv[])
      // 8. 获取成员
      cout << "mat4.row = " << mat4.getRowsNum() << ", mat4.col = " << mat4.getColsNum() << endl;
      cout << "get mat4(0, 1) = " << mat4(0, 1) << endl;
+     cout << "get mat4[0][1] = " << mat4[0][1] << endl;
 
      // 9. 修改成员
      mat4(0, 1) = 666;
@@ -167,38 +168,6 @@ int main(int argc, char const *argv[])
      gettimeofday(&endv, NULL);
      t_usec_base = (endv.tv_sec - startv.tv_sec) * 1000000 + (endv.tv_usec - startv.tv_usec);
      printf("Method ijk: duration = %ld us\n", t_usec_base);
-
-     // normal acc, analog parallelism
-     gettimeofday(&startv, NULL);
-     c = a.multiply_acc(b);
-     // cout << c << endl;
-     gettimeofday(&endv, NULL);
-     t_usec_improved = (endv.tv_sec - startv.tv_sec) * 1000000 + (endv.tv_usec - startv.tv_usec);
-     printf("Method ijk acc: duration = %ld us, acc = %lf\n", t_usec_improved, (double)t_usec_base / t_usec_improved);
-
-     // jki
-     gettimeofday(&startv, NULL);
-     c = a.multiply_jki(b);
-     // cout << c << endl;
-     gettimeofday(&endv, NULL);
-     t_usec_improved = (endv.tv_sec - startv.tv_sec) * 1000000 + (endv.tv_usec - startv.tv_usec);
-     printf("Method jki: duration = %ld us, acc = %lf\n", t_usec_improved, (double)t_usec_base / t_usec_improved);
-
-     // ikj
-     gettimeofday(&startv, NULL);
-     c = a.multiply_ikj(b);
-     // cout << c << endl;
-     gettimeofday(&endv, NULL);
-     t_usec_improved = (endv.tv_sec - startv.tv_sec) * 1000000 + (endv.tv_usec - startv.tv_usec);
-     printf("Method ikj: duration = %ld us, acc = %lf\n", t_usec_improved, (double)t_usec_base / t_usec_improved);
-
-     // ikj acc
-     gettimeofday(&startv, NULL);
-     c = a.multiply_ikj_acc(b);
-     // cout << c << endl;
-     gettimeofday(&endv, NULL);
-     t_usec_improved = (endv.tv_sec - startv.tv_sec) * 1000000 + (endv.tv_usec - startv.tv_usec);
-     printf("Method ikj acc: duration = %ld us, acc = %lf\n", t_usec_improved, (double)t_usec_base / t_usec_improved);
 
      return 0;
 }

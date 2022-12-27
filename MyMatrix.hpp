@@ -28,6 +28,30 @@
 #include <assert.h>
 using namespace std;
 
+//declare
+template <typename T>
+class MyMatrix;
+
+template <typename T>
+class DoubleSubscript {
+private:
+	T** tmpMatrix;
+	int firstSubscript;
+	int column_num;
+
+public:
+	DoubleSubscript(MyMatrix<T>& data, int _firstSubscript) {
+		tmpMatrix = data.m_data;
+		firstSubscript = _firstSubscript;
+		column_num = data.m_cols;
+	}
+
+	T& operator[](int secondSubcript) {
+		assert((0<= secondSubcript)&&(secondSubcript<column_num));
+		return tmpMatrix[firstSubscript][secondSubcript];
+	}
+};
+
 // 2-dimensional matrix
 template <typename T>
 class MyMatrix
@@ -69,9 +93,6 @@ public:
 	MyMatrix subtract(const MyMatrix& otherMatrix) const;
 	MyMatrix multiply(const T& num) const;
 	MyMatrix multiply(const MyMatrix& otherMatrix) const;
-	MyMatrix multiply_acc(const MyMatrix& otherMatrix) const;
-	MyMatrix multiply_jki(const MyMatrix& otherMatrix) const;
-	MyMatrix multiply_ikj(const MyMatrix& otherMatrix) const;
 	MyMatrix multiply_ikj_acc(const MyMatrix& otherMatrix) const;
 	MyMatrix transpose() const;
 	MyMatrix inverse() const;
@@ -92,6 +113,7 @@ public:
 	MyMatrix& operator*=(const MyMatrix& otherMatrix);
 	MyMatrix& operator=(const MyMatrix& otherMatrix); // 动态内存分配
 	T& operator()(int i, int j);
+	DoubleSubscript<T> MyMatrix<T>::operator[](int i);
 
 	friend ostream& operator<<(ostream& out, const MyMatrix<T>& matrix)		//输出流运算符 << 
 	{
@@ -113,6 +135,7 @@ public:
 
 		return out;
 	}
+	friend class DoubleSubscript<T>;
 };
 
 template <typename T>
@@ -298,99 +321,12 @@ MyMatrix<T> MyMatrix<T>::multiply(const MyMatrix& otherMatrix) const
 }
 
 template <typename T>
-MyMatrix<T> MyMatrix<T>::multiply_acc(const MyMatrix& otherMatrix) const
-{
-	assert(m_cols == otherMatrix.m_rows);
-
-	MyMatrix result(m_rows, otherMatrix.m_cols);
-	for (int i = 0; i < m_rows; i++)
-		for (int j = 0; j < otherMatrix.m_cols; j += 4)
-		{
-			T sum1, sum2, sum3, sum4;
-			sum1 = sum2 = sum3 = sum4 = 0;
-			for (int k = 0; k < m_cols; k++)
-			{
-				T s = m_data[i][k];
-				sum1 += s * otherMatrix.m_data[k][j];
-				sum2 += s * otherMatrix.m_data[k][j + 1];
-				sum3 += s * otherMatrix.m_data[k][j + 2];
-				sum4 += s * otherMatrix.m_data[k][j + 3];
-			}
-			result.m_data[i][j] = sum1;
-			result.m_data[i][j + 1] = sum2;
-			result.m_data[i][j + 2] = sum3;
-			result.m_data[i][j + 3] = sum4;
-		}
-	return result;
-}
-
-template <typename T>
-MyMatrix<T> MyMatrix<T>::multiply_jki(const MyMatrix& otherMatrix) const
-{
-	assert(m_cols == otherMatrix.m_rows);
-
-	MyMatrix result(m_rows, otherMatrix.m_cols);
-	for (int j = 0; j < otherMatrix.m_cols; j++)
-		for (int k = 0; k < m_cols; k++)
-			for (int i = 0; i < m_rows; i++)
-				result.m_data[i][j] += m_data[i][k] * otherMatrix.m_data[k][j];
-
-	return result;
-}
-
-template <typename T>
-MyMatrix<T> MyMatrix<T>::multiply_ikj(const MyMatrix& otherMatrix) const
-{
-	assert(m_cols == otherMatrix.m_rows);
-
-	MyMatrix result(m_rows, otherMatrix.m_cols);
-	for (int i = 0; i < m_rows; i++)
-		for (int k = 0; k < m_cols; k++)
-			for (int j = 0; j < otherMatrix.m_cols; j++)
-				result.m_data[i][j] += m_data[i][k] * otherMatrix.m_data[k][j];
-
-	return result;
-}
-
-template <typename T>
-MyMatrix<T> MyMatrix<T>::multiply_ikj_acc(const MyMatrix& otherMatrix) const
-{
-	assert(m_cols == otherMatrix.m_rows);
-
-	MyMatrix result(m_rows, otherMatrix.m_cols);
-	for (int i = 0; i < m_rows; i++)
-	{
-		T* temp = new T[otherMatrix.m_cols];
-		for (int j = 0; j < otherMatrix.m_cols; j++)
-			temp[j] = 0;
-
-		for (int k = 0; k < m_cols; k++)
-		{
-			T s = m_data[i][k];
-
-			for (int j = 0; j < otherMatrix.m_cols; j += 4)
-			{
-				temp[j] += s * otherMatrix.m_data[k][j];
-				temp[j + 1] += s * otherMatrix.m_data[k][j + 1];
-				temp[j + 2] += s * otherMatrix.m_data[k][j + 2];
-				temp[j + 3] += s * otherMatrix.m_data[k][j + 3];
-			}
-		}
-
-		for (int j = 0; j < otherMatrix.m_cols; j++)
-			result.m_data[i][j] = temp[j];
-		delete[] temp;
-	}
-
-	return result;
-}
-
-template <typename T>
 MyMatrix<T> MyMatrix<T>::transpose() const
 {
 	MyMatrix result(m_cols, m_rows);
-	for (int i = 0; i < m_rows; i++)
-		for (int j = 0; j < m_cols; j++)
+#pragma omp parallel for
+	for (int j = 0; j < m_cols; j++)
+		for (int i = 0; i < m_rows; i++)
 			result.m_data[j][i] = m_data[i][j];
 
 	return result;
@@ -449,7 +385,7 @@ MyMatrix<T> MyMatrix<T>::inverse() const
 }
 
 template <typename T>
-void MyMatrix<T>::rowTrans(int src, T k, int dst)
+void MyMatrix<T>::rowTrans(int src, T k, int dst)		// src 行乘常数，存到第 dst 行
 {
 	if (dst == -1)
 		for (int j = 0; j < m_cols; j++)
@@ -464,6 +400,7 @@ void MyMatrix<T>::rowSwap(int src, int dst)
 {
 	T temp;
 
+#pragma omp parallel for
 	for (int j = 0; j < m_cols; j++)
 	{
 		temp = m_data[src][j];
@@ -477,7 +414,7 @@ MyMatrix<T> MyMatrix<T>::operator+(const T& num) const
 {
 	return add(num);
 }
-// extend interface
+// extend interface: realize num + matrix
 template <typename T>
 MyMatrix<T> operator+(const T& num, const MyMatrix<T>& otherMatrix) {
 	return otherMatrix.add(num);
@@ -534,7 +471,7 @@ MyMatrix<T> MyMatrix<T>::operator*(const T& num) const
 {
 	return multiply(num);
 }
-// extend interface
+// extend interface: realize num * matrix
 template <typename T>
 MyMatrix<T> operator*(const T& num, const MyMatrix<T>& otherMatrix) {
 	return otherMatrix.multiply(num);
@@ -587,4 +524,13 @@ T& MyMatrix<T>::operator()(int i, int j)
 	assert(j < m_cols);
 
 	return m_data[i][j];
+}
+
+// double subscropt
+template <typename T>
+DoubleSubscript<T> MyMatrix<T>::operator[](int i) {
+	assert((0 <= i) && (i < this->m_rows));
+
+	DoubleSubscript<T> MaxtrixDoubleSubscript(*this, i);
+	return MaxtrixDoubleSubscript;
 }
