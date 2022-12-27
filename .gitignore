@@ -1,0 +1,8 @@
+
+**/ obj
+**/ bin
+**/.vs
+**/Debug/**
+**/x64/
+
+**/Release/
