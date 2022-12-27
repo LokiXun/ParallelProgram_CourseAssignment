@@ -32,17 +32,17 @@ int main(int argc, char const *argv[])
 
      // 1. 无参构造
      MyMatrix<int> mat1;
-     cout << "无参构造 mat1 = \n"
+     cout << "default constructor mat1 = \n"
           << mat1 << endl;
 
      // 2. 方阵构造
      MyMatrix<float> mat2(3);
-     cout << "方阵构造 mat2 = \n"
+     cout << "eye-matrix constructor mat2 = \n"
           << mat2 << endl;
 
      // 3. 一般矩阵构造
      MyMatrix<double> mat3(2, 3);
-     cout << "一般矩阵构造 mat3 = \n"
+     cout << "2x3c matrix mat3 = \n"
           << mat3 << endl;
 
      // 4. 把buffer转换成m*n的矩阵
@@ -147,7 +147,7 @@ int main(int argc, char const *argv[])
           << mat6 * mat6.inverse() << endl;
 
      // 11. 乘法加速
-     int size = 2000; // NOTE: set 2000 to test
+     int size = 20;
      MyMatrix<int> a = MyMatrix<int>::random(size, size, 10);
      MyMatrix<int> b = MyMatrix<int>::random(size, size, 10);
      MyMatrix<int> c;
@@ -167,7 +167,8 @@ int main(int argc, char const *argv[])
      // cout << c << endl;
      gettimeofday(&endv, NULL);
      t_usec_base = (endv.tv_sec - startv.tv_sec) * 1000000 + (endv.tv_usec - startv.tv_usec);
-     printf("Method ijk: duration = %ld us\n", t_usec_base);
+     printf("Method: duration = %ld us\n", t_usec_base);
 
+     system("pause");
      return 0;
 }
