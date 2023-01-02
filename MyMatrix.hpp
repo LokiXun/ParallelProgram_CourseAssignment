@@ -33,7 +33,7 @@ template <typename T>
 class MyMatrix;
 
 template <typename T>
-class DoubleSubscript {
+class DoubleSubscript {		// realize to visit 2D-matrix's element using [i][j]
 private:
 	T** tmpMatrix;
 	int firstSubscript;
@@ -93,7 +93,6 @@ public:
 	MyMatrix subtract(const MyMatrix& otherMatrix) const;
 	MyMatrix multiply(const T& num) const;
 	MyMatrix multiply(const MyMatrix& otherMatrix) const;
-	MyMatrix multiply_ikj_acc(const MyMatrix& otherMatrix) const;
 	MyMatrix transpose() const;
 	MyMatrix inverse() const;
 

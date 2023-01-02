@@ -6,3 +6,7 @@
 **/x64/
 
 **/Release/
+
+**/__pycache__/
+**/.idea/
+*.dll
