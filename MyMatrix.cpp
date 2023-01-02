@@ -45,17 +45,28 @@ extern "C" {
 		std::cout << "multiply_2matrix==============" << endl;
 		std::cout << "firstMatrix=\n" << *firstMatrix << endl;
 		std::cout << "secondMatrix=\n" << *secondMatrix << endl;
+		LARGE_INTEGER start_time, end_time, time_freq;
+		QueryPerformanceFrequency(&time_freq);
+		QueryPerformanceCounter(&start_time);
 		MyMatrix<int> tmpMatrix = firstMatrix->multiply(*secondMatrix);
+		QueryPerformanceCounter(&end_time);//start 
+		std::cout << "multiply_2matrix success, costs = " << ((double)end_time.QuadPart - start_time.QuadPart) / (double)time_freq.QuadPart << "s" << std::endl;
+
 		MyMatrix<int>* resultMatrix = new MyMatrix<int>(tmpMatrix);
 		cout << "result = \n" << *resultMatrix;
 		return resultMatrix;
 	}
 	DATAEXCHANGEDLL_API MyMatrix<int>* multiply_int(MyMatrix<int>* firstMatrix, int multiplyIntData) {
 		std::cout << "multiply_int==============" << endl;
-		std::cout << "firstMatrix=\n" << * firstMatrix << endl;
-		std::cout << "multiplyIntData=\n" << multiplyIntData << endl;
-
+		std::cout << "firstMatrix=\n" << *firstMatrix << endl;
+		std::cout << "multiplyIntData=" << multiplyIntData << endl;
+		LARGE_INTEGER start_time, end_time, time_freq;
+		QueryPerformanceFrequency(&time_freq);
+		QueryPerformanceCounter(&start_time);
 		MyMatrix<int> tmpMatrix = firstMatrix->multiply(multiplyIntData);
+		QueryPerformanceCounter(&end_time);//start 
+		std::cout << "multiply_int success, costs = " << ((double)end_time.QuadPart - start_time.QuadPart) / (double)time_freq.QuadPart << "s" << std::endl;
+
 		MyMatrix<int>* resultMatrix = new MyMatrix<int>(tmpMatrix);
 		cout << "result = \n" << *resultMatrix;
 		return resultMatrix;

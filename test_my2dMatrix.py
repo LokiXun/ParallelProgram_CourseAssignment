@@ -54,7 +54,7 @@ class My2dMatrix:
         self.matrix_obj = myMatrix_lib.init_myMatrix2D_int(self.ct_ptr,
                                                            self.matrix_np_array.shape[0],
                                                            self.matrix_np_array.shape[1])
-        print(f"type={type(self.matrix_obj)}, matrix_obj={self.matrix_obj}")
+        # print(f"type={type(self.matrix_obj)}, matrix_obj={self.matrix_obj}")
 
     @staticmethod
     def multiply_with_int(matrix_obj, int_number: int):
@@ -68,23 +68,26 @@ class My2dMatrix:
 
 
 if __name__ == '__main__':
-    matrix_a = np.array([[1, 2, 3], [4, 5, 6]])
-    matrix_b = np.array([[1, 1], [2, 2], [3, 3]])
+    # matrix_a = np.array([[1, 2, 3], [4, 5, 6]])
+    # matrix_b = np.array([[1, 1], [2, 2], [3, 3]])
+    np.random.seed(1)
+    matrix_a = np.random.randint(1, 100, size=(100, 100))
+    matrix_b = np.random.randint(1, 100, size=(100, 100))
 
     my_2d_matrix_a = My2dMatrix(matrix_a)
     my_2d_matrix_b = My2dMatrix(matrix_b)
     my_2d_matrix_result = My2dMatrix(np.array([[]]))
 
-    start_time = time.time()
     multiply_int_data = 999
-    my_2d_matrix_result.matrix_obj = My2dMatrix.multiply_with_int(my_2d_matrix_a.matrix_obj, multiply_int_data)
+    my_2d_matrix_result.matrix_obj = My2dMatrix.multiply_with_int(
+        my_2d_matrix_a.matrix_obj, multiply_int_data)  # 0.0181378s
     # My2dMatrix.multiply_with_int(my_2d_matrix_result.matrix_obj, 4)
-    print(f"my2DMatrix multiply_with_int costs={time.time() - start_time}s")
-    result_matrix = matrix_a * multiply_int_data
-    print(f"numpy multiply_with_int costs={time.time() - start_time}s")
+    start_time = time.time_ns()
+    result_matrix = matrix_a * multiply_int_data  # 0.0000000000s
+    print(f"numpy multiply_with_int costs={(time.time_ns() - start_time) / (10 ** 9):.10f}s")
 
-    start_time = time.time()
-    my_2d_matrix_a.multiply_with_matrix(my_2d_matrix_a.matrix_obj, my_2d_matrix_b.matrix_obj)
-    print(f"my2DMatrix multiply_with_matrix costs={time.time() - start_time}s")
+    my_2d_matrix_a.multiply_with_matrix(my_2d_matrix_a.matrix_obj, my_2d_matrix_b.matrix_obj)  # 0.0039863s
+    start_time = time.time_ns()
     result_matrix = matrix_a @ matrix_b
-    print(f"numpy multiply_with_matrix costs={time.time() - start_time}s")
+    print(f"numpy multiply_with_matrix costs={(time.time_ns() - start_time) / (10 ** 9):.10f}s")  # 0.0009999000s
+    print(f"result_matrix\n={result_matrix}")
