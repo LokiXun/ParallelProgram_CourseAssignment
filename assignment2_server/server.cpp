@@ -61,6 +61,14 @@ int closeSocket() {
 	return 0;
 }
 
+// =============================================== SUM
+// No speedUp
+float SimpleSum(const float data[], const int len) {
+	float result = 0.0f;
+	for (int i = 0; i < len; i++) result += log10(sqrt(data[i] / 4.0));
+
+	return result;
+}
 
 /*
 * Sum : Speed Up Using SSE + OpenMP
@@ -145,14 +153,15 @@ float sumSpeedUp(const float data[], const int len) {
 
 	float ret;
 	float* retSum = new float[2] { 0 };
-	int ind = int(len / 2) - 1;//ind指client段所需计算到的下标
+	int firstHalfLen = MAX_THREADS * CLIENT_SUBDATANUM; // client 计算前面一部分数据长度
+	int secondHalfLen = MAX_THREADS * SERVER_SUBDATANUM;
 
 	// 0. 任务分配
 	// 目前只有2台机器，发送前一半给client计算，后一半自己算
-	send(servConnection, (char*)&ind, sizeof(int), NULL);
+	send(servConnection, (char*)&firstHalfLen, sizeof(int), NULL);
 
 	//1. server 算计算后一半
-	retSum[0] = SumArray_speedUp(data, ind + 1, len - 1);
+	retSum[0] = SumArray_speedUp(data, firstHalfLen, DATANUM-1);
 
 	//2. 接收Client端的结果
 	recv(servConnection, (char*)&retSum[1], sizeof(float), NULL);
@@ -162,6 +171,17 @@ float sumSpeedUp(const float data[], const int len) {
 	std::cout << "Sum SpeedUp Calculate Finished! reesult = " << ret << std::endl;
 
 	return ret;
+}
+
+// =============================================== MAX
+// No SpeedUp
+float SimpleMax(const float data[], const int len) {
+	float max_value = data[0];
+	for (int i = 0; i <= len; i++)
+	{
+		max_value = max_value >= data[i] ? max_value : data[i];//
+	}
+	return max_value;
 }
 
 /*
@@ -205,12 +225,13 @@ float singleSpdMax(const float data[], const int stInd, const int len) {
 */
 DWORD WINAPI maxArray_multithread(LPVOID lpParameter)
 {
-	THREAD_DATA* threadData = (THREAD_DATA*)lpParameter;
+	THREAD_DATA_SORT* threadData = (THREAD_DATA_SORT*)lpParameter;
 
-	float max_value = threadData->data[threadData->start_index];
-	for (int i = threadData->start_index; i <= (threadData->end_index); i++)
+	int end_index = threadData->start_index + threadData->block_data_len;
+	float max_value = rawFloatData[threadData->start_index];
+	for (int i = threadData->start_index; i < end_index; i++)
 	{
-		max_value = max_value >= threadData->data[i] ? max_value : threadData->data[i];//
+		max_value = max_value >= rawFloatData[i] ? max_value : rawFloatData[i];//
 	}
 	floatResults[threadData->thread_id] = max_value;
 	ReleaseSemaphore(hSemaphores[threadData->thread_id], 1, NULL);//释放信号量，信号量加1 
@@ -227,10 +248,11 @@ DWORD WINAPI maxArray_multithread(LPVOID lpParameter)
 float maxSpeedUp(const float data[], const int len) {
 	float ret;
 	float* retMax = new float[2] { 0 };
-	int ind = int(len / 2) - 1;//ind指client段所需计算到的下标
+	int firstHalfLen = MAX_THREADS * CLIENT_SUBDATANUM; // client 计算前面一部分数据长度
+	int secondHalfLen = MAX_THREADS * SERVER_SUBDATANUM;
 
 	// 0. 任务分配
-	send(servConnection, (char*)&ind, sizeof(int), NULL);
+	send(servConnection, (char*)&firstHalfLen, sizeof(int), NULL);
 
 
 	//1. server 计算后面一半
@@ -238,37 +260,29 @@ float maxSpeedUp(const float data[], const int len) {
 	QueryPerformanceFrequency(&time_freq);
 	QueryPerformanceCounter(&start_time);//start  
 	//================================================multi-thread
-	int waited_array_start_index = int(ind) + 1;
-	int CURRENT_THREAD_NUM = min(MAX_THREADS, len - waited_array_start_index); // 当前线程数，如果数据量 < MAX_THREADS 不需要开这么多
-	int each_thread_process_num = ceil((len - waited_array_start_index) / CURRENT_THREAD_NUM);
-
-	THREAD_DATA* current_thread_data = new THREAD_DATA[MAX_THREADS];
+	THREAD_DATA_SORT* current_thread_data = new THREAD_DATA_SORT[MAX_THREADS];
 	HANDLE hThreads[MAX_THREADS];
 	// 1.1 create thread task
-	for (int i = 0; i < MAX_THREADS; i++)
+	for (int thread_index = 0; thread_index < MAX_THREADS; thread_index++)
 	{
-		hSemaphores[i] = CreateSemaphore(NULL, 0, 1, NULL);
-		ThreadID[i] = i;
-		floatResults[i] = 0;
-
+		hSemaphores[thread_index] = CreateSemaphore(NULL, 0, 1, NULL);
 		// 线程输入数据
-		current_thread_data[i].thread_id = i;
-		current_thread_data[i].data = data;
-		current_thread_data[i].start_index = min(waited_array_start_index + i * each_thread_process_num, len - 1);
-		current_thread_data[i].end_index = min(current_thread_data[i].start_index + each_thread_process_num - 1, len - 1);
-		floatResults[i] = data[waited_array_start_index];  // set default
+		current_thread_data[thread_index].thread_id = thread_index;
+		current_thread_data[thread_index].start_index = firstHalfLen + thread_index * SERVER_SUBDATANUM;	// index in origin rawData
+		current_thread_data[thread_index].block_data_len = SERVER_SUBDATANUM;  // [start, end)
+		floatResults[thread_index] = data[current_thread_data[thread_index].start_index];  // set default
 
-		hThreads[i] = CreateThread(
+		hThreads[thread_index] = CreateThread(
 			NULL,// default security attributes
 			0,// use default stack size
 			maxArray_multithread,// thread function
-			&current_thread_data[i],// argument to thread function
+			&current_thread_data[thread_index],// argument to thread function
 			CREATE_SUSPENDED, // use default creation flags.0 means the thread will be run at once  CREATE_SUSPENDED
 			NULL);
 
-		if (hThreads[i] == NULL)
+		if (hThreads[thread_index] == NULL)
 		{
-			printf("WARN: hThreads=%d CreateThread error: %d\n", i, GetLastError());
+			printf("WARN: hThreads=%d CreateThread error: %d\n", thread_index, GetLastError());
 			throw std::exception("WARN: getMax CreateThread error!");
 		}
 	}
@@ -288,7 +302,7 @@ float maxSpeedUp(const float data[], const int len) {
 
 
 	// 1.3 get result
-	retMax[0] = data[waited_array_start_index];
+	retMax[0] = data[firstHalfLen];
 	for (int i = 0; i < MAX_THREADS; i++)
 		retMax[0] = retMax[0] > floatResults[i] ? retMax[0] : floatResults[i];
 
@@ -309,7 +323,7 @@ float maxSpeedUp(const float data[], const int len) {
 }
 
 
-// ========================= SORT==============================
+// =============================================== SORT
 /*
 * 排序 multithread
 */
@@ -341,7 +355,7 @@ float sortSpeedUp(const float data[], const int len, float result[]) {
 
 	int firstHalfLen = MAX_THREADS * CLIENT_SUBDATANUM; // client 计算前面一部分数据长度
 	int secondHalfLen = MAX_THREADS * SERVER_SUBDATANUM;
-	
+
 	// 0. 任务分配
 	send(servConnection, (char*)&firstHalfLen, sizeof(int), NULL);
 	printf("Send SortTask to CLIENT, firstHalfLen=%d\n", firstHalfLen);
@@ -434,7 +448,7 @@ float sortSpeedUp(const float data[], const int len, float result[]) {
 	QueryPerformanceCounter(&end_time);//start 
 	std::cout << "Server SORT finished! sort_success=" << sort_success_flag <<
 		", costs = " << ((double)end_time.QuadPart - start_time.QuadPart) / (double)time_freq.QuadPart << "s" << std::endl;
-	for (int i = 0; i < min(SERVER_DATANUM,10); i++) {
+	for (int i = 0; i < min(SERVER_DATANUM, 10); i++) {
 		std::cout << ServerSortMergedResult[i] << " ";
 	}
 	std::cout << std::endl;
@@ -472,7 +486,7 @@ float sortSpeedUp(const float data[], const int len, float result[]) {
 		//printf("%d, %f\r\n", recv_len, *clinet_sort_result);
 	}
 	printf("CLIENT RECEVIED RESULT:");
-	for (int i = 0; i < min(CLIENT_DATANUM,10); i++) {
+	for (int i = 0; i < min(CLIENT_DATANUM, 10); i++) {
 		std::cout << ClientSortMergedResult[i] << " ";
 	}
 	std::cout << std::endl;
@@ -519,6 +533,11 @@ int main() {
 	//测试循环
 	int lpFlag = 0;
 	enum Method mtd = Method::WAIT;
+	LARGE_INTEGER start_time, end_time, time_freq;
+	QueryPerformanceFrequency(&time_freq);
+	double test_seconds = 0.0f;
+	float result = 0.0f; // max. sum result
+	int sort_success_flag = 0;
 	while (lpFlag == 0) {
 		if ((recv_len = recv(servConnection, (char*)&mtd, sizeof(int), NULL)) < 0)	//接收指令
 		{
@@ -528,16 +547,44 @@ int main() {
 		//cout << "Client message received.";
 		switch (mtd) {
 		case Method::MT_SUM:
-			cout << "Testing sumSpeedup  method..." << endl;
-			ret = sumSpeedUp(rawFloatData, DATANUM);
-			cout << "The result is " << ret << endl;
+			// ============== Test SinglePC runtime
+			QueryPerformanceCounter(&start_time);//start  
+			result = SimpleSum(rawFloatData, DATANUM);
+			QueryPerformanceCounter(&end_time);
+			test_seconds = ((double)end_time.QuadPart - start_time.QuadPart) / (double)time_freq.QuadPart;
+			std::cout << "SimpleSum: Test result = " << result << ", costs = " << test_seconds << "s" << std::endl;
+
+			// ============== 2-PC SpeedUp
+			cout << "Testing 2-PC SpeedUp sumSpeedup  method..." << endl;
+			result = sumSpeedUp(rawFloatData, DATANUM);
+			cout << "The result is " << result << endl;
 			break;
 		case Method::MT_MAX:
+			// ============== Test SinglePC runtime
+			QueryPerformanceCounter(&start_time);//start  
+			result = SimpleMax(rawFloatData, DATANUM);
+			QueryPerformanceCounter(&end_time);
+			test_seconds = ((double)end_time.QuadPart - start_time.QuadPart) / (double)time_freq.QuadPart;
+			std::cout << "SimpleMax: Test result = " << result << ", costs = " << test_seconds << "s" << std::endl;
+
+			// ============== 2-PC SpeedUp
 			cout << "Testing maxSpeedup method..." << endl;
-			ret = maxSpeedUp(rawFloatData, DATANUM);
-			cout << "The result is " << ret << endl;
+			result = maxSpeedUp(rawFloatData, DATANUM);
+			cout << "The result is " << result << endl;
 			break;
 		case Method::MT_SORT:
+			// ============== Test SinglePC runtime
+			for (int i = 0; i < DATANUM; i++) {
+				SortTotalResult[i] = rawFloatData[i];
+			}
+			QueryPerformanceCounter(&start_time);//start  
+			quickSort(SortTotalResult, 0, DATANUM - 1);
+			QueryPerformanceCounter(&end_time);
+			test_seconds = ((double)end_time.QuadPart - start_time.QuadPart) / (double)time_freq.QuadPart;
+			sort_success_flag = check_sorted_result(SortTotalResult, DATANUM);
+			std::cout << "quickSort: Test sort_success_flag = " << sort_success_flag << ", costs = " << test_seconds << "s" << std::endl;
+
+			// ============== 2-PC SpeedUp
 			cout << "Testing sortSpeedup method..." << endl;
 			sortSpeedUp(rawFloatData, DATANUM, SortTotalResult);
 			break;

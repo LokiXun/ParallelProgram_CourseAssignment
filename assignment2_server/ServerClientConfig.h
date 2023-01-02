@@ -32,6 +32,7 @@
 #define CLIENT_SUBDATANUM  10    // 单PC数据：1000000
 #define SERVER_DATANUM	(SERVER_SUBDATANUM * MAX_THREADS)
 #define CLIENT_DATANUM	(CLIENT_SUBDATANUM * MAX_THREADS)
+#define TEST_REPEAT_NUM		5		// 测试单机 sum, max, sort 的重复次数
 
 
 // Network

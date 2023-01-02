@@ -1,4 +1,4 @@
-﻿﻿﻿﻿﻿# Parallel Programming Course Assignment :baby_chick:
+﻿﻿﻿﻿﻿﻿﻿﻿﻿# Parallel Programming Course Assignment :baby_chick:
 
 Team: RongjiXun, JianLiangChen
 
@@ -12,7 +12,7 @@ Team: RongjiXun, JianLiangChen
 	c、**运算符重载**：(1)加法 + ；(2)减法 - ；(3)矩阵数乘、矩阵相乘 * ；(4)复制赋值 ；(5)输出流运算符 << 
 	d、其他方法：(1)获取成员；(2)修改成员；(3)动态内存分配
 评分标准，功能实现60分；实现**矩阵求逆和伪逆**且考虑异常情况的，矩阵乘法写普通版版本和**加速版本**的，且加速比大于2.0的10分；
-在python环境中调用自己写的程序，并和python直接实现以及调用numpy实现矩阵乘法三者进行比较和分析30分（不能直接使用时，可以借助于cython 最终实现最终在python的调用）；提交源代码和工程文件（每人一份），提交的压缩包大于5MB的扣5分。
+**在python环境中调用自己写的程序，并和python直接实现以及调用numpy实现矩阵乘法三者进行比较和分析30分（不能直接使用时，可以借助于cython 最终实现最终在python的调用）**；提交源代码和工程文件（每人一份），提交的压缩包大于5MB的扣5分。
 
 矩阵类名: MyMatrix，支持一下使用方法
 
@@ -33,12 +33,82 @@ temp*=temp3;//支持矩阵乘法和矩阵向量乘，如果不能乘返回值
 cout<<temp<<endl;//输出temp格式到屏幕
 ```
 
-- `CustomMatrix`
-
 > [参考](https://medium.com/@furkanicus/how-to-create-a-matrix-class-using-c-3641f37809c7)
 > [参考2](http://www.quantstart.com/articles/Matrix-Classes-in-C-The-Header-File/)
 
+- Overload `<<` Operator
 
+  > [参考](https://learn.microsoft.com/en-us/cpp/standard-library/overloading-the-output-operator-for-your-own-classes?view=msvc-170)
+
+  The overloaded operator returns a reference to the original `ostream` object, which means you can combine insertions:
+
+  ```cpp
+  friend ostream& operator<<(ostream& out, const MyMatrix<T>& matrix)		//输出流运算符 << 
+  {
+      out << "[";
+      for (int i = 0; i < matrix.m_rows; i++)
+      {
+          if (i != 0)
+              out << " ";
+          for (int j = 0; j < matrix.m_cols; j++)
+          {
+              out << matrix.m_data[i][j];
+              if (i != matrix.m_rows - 1 || j != matrix.m_cols - 1)
+                  out << ", ";
+          }
+          if (i != matrix.m_rows - 1)
+              out << endl;
+      }
+      out << "]" << endl;
+  
+      return out;
+  }
+  ```
+
+- overload double subcripts
+
+  > [参考](https://www.youtube.com/watch?v=zVQutx4cdrM)
+
+
+
+### ctypes import cpp
+
+测试：对比myMatrix、numpy 矩阵乘法：数乘、矩阵乘
+
+```python
+np.random.seed(1)
+matrix_a = np.random.randint(1, 100, size=(100, 100))
+matrix_b = np.random.randint(1, 100, size=(100, 100))
+
+my_2d_matrix_a = My2dMatrix(matrix_a)
+my_2d_matrix_b = My2dMatrix(matrix_b)
+my_2d_matrix_result = My2dMatrix(np.array([[]]))
+
+```
+
+- 数乘
+
+  ```python
+  multiply_int_data = 999
+  my_2d_matrix_result.matrix_obj = My2dMatrix.multiply_with_int(
+      my_2d_matrix_a.matrix_obj, multiply_int_data)  # 0.0181378s
+  # My2dMatrix.multiply_with_int(my_2d_matrix_result.matrix_obj, 4)
+  start_time = time.time_ns()
+  result_matrix = matrix_a * multiply_int_data  # 0.0000000000s
+  print(f"numpy multiply_with_int costs={(time.time_ns() - start_time) / (10 ** 9):.10f}s")
+  ```
+
+- 矩阵乘法
+
+  ```python
+  my_2d_matrix_a.multiply_with_matrix(my_2d_matrix_a.matrix_obj, my_2d_matrix_b.matrix_obj)  # 0.0039863s
+  start_time = time.time_ns()
+  result_matrix = matrix_a @ matrix_b
+  print(f"numpy multiply_with_matrix costs={(time.time_ns() - start_time) / (10 ** 9):.10f}s")  # 0.0009999000s
+  print(f"result_matrix\n={result_matrix}")
+  ```
+
+  
 
 
 
@@ -63,31 +133,30 @@ cout<<temp<<endl;//输出temp格式到屏幕
 >
 > 追加：**三个功能自己代码实现，不得调用第三方库函数**（比如，sd::max,std::sort）,违反者每函数扣10分。多线程，多进程，OPENMP可以使用。
 
+- 数据：自己生成，可参照下述方法。
 
+  测试数据量和计算内容为：
 
-数据：自己生成，可参照下述方法。
+  ```cpp
+  #define MAX_THREADS 64
+  #define SUBDATANUM 2000000
+  #define DATANUM (SUBDATANUM * MAX_THREADS)   /*这个数值是总数据量*/
+  
+  // 待测试数据定义为：
+  float rawFloatData[DATANUM];
+  
+  // 参照下列数据初始化代码：**两台计算机可以分开初始化，减少传输代价**
+  for (size_t i = 0; i < DATANUM; i++)//数据初始化
+  {
+  	rawFloatData[i] = float(i+1);
+  }
+  ```
 
-测试数据量和计算内容为：
-
-```cpp
-#define MAX_THREADS 64
-#define SUBDATANUM 2000000
-#define DATANUM (SUBDATANUM * MAX_THREADS)   /*这个数值是总数据量*/
-
-// 待测试数据定义为：
-float rawFloatData[DATANUM];
-
-// 参照下列数据初始化代码：**两台计算机可以分开初始化，减少传输代价**
-for (size_t i = 0; i < DATANUM; i++)//数据初始化
-{
-	rawFloatData[i] = float(i+1);
-}
-```
 
 为了模拟任务：每次访问数据时，用`log(sqrt(rawFloatData[i]))`进行访问！就是说比如计算加法 用 `sum+=log(sqrt(rawFloatData[i]))`,而不是 `sum+=rawFloatData[i]` !!。这里计算结果和存储精度之间有损失，但你们机器的指令集限制，**如果使用`SSE`中的**`double`型的话，单指令只能处理4个double，**如果是float则可以8个。所以用float加速比会更大。**
 
 - **提供代码（1/2）**
-  需要提供的函数：(不加速版本，为同样的数据量在两台计算机上各自运行的时间。算法一致，只是**不采用任何加速手段（SSE，多线程或者OPENMP)）**
+  需要提供的函数：(不加速版本，为同样的数据量在**两台计算机上各自运行的时间**。算法一致，只是**不采用任何加速手段（SSE，多线程或者OPENMP)）**
 
   ```cpp
   float sum(const float data[],const int len); //data是原始数据，len为长度。结果通过函数返回
@@ -123,14 +192,39 @@ for (size_t i = 0; i < DATANUM; i++)//数据初始化
 
 大家注意，如果单机上那么大数据量无法计算，要想办法**可能会遇到超大数加很小数加不上的现象**。修改 `#define SUBDATANUM 2000000` 为 `#define SUBDATANUM 1000000`做单机计算。双机上每个计算机都申请`#define SUBDATANUM 1000000`大的数据，即实现`#define SUBDATANUM 2000000`的运算。
 
+### sum
 
-
-- Max
-  $$
-  argmin_x (y = x + \frac{Num}{x} )\\
-  y = (\sqrt{x})^2 +- 2\sqrt{C}*\sqrt{x} * \frac{1}{\sqrt{x}} + \frac{C}{(\sqrt{x})^2} \\
-  y = (\sqrt{x} - \frac{\sqrt{C}}{\sqrt{x}})^2 + 2*\sqrt{C} \\
+- 单机不加速版本 `float SimpleSum(const float data[], const int len)`
   
-  \therefore \text{the computation time y is minimum when } x=\sqrt{C}, \\
-  \text{ has x workers>>} \sqrt{C} \quad \\\text{ to compute max element their own part of array in parallel.}
-  $$
+
+### sort
+
+- 快速排序
+
+  ```cpp
+  // ServerClientConfig.h  Line.101
+  void quickSort(float* data, int lowIndex, int highIndex) {
+  	int i = lowIndex, j = highIndex;
+  	float tmp_data = data[i];
+  
+  	while (i < j) {
+  		while (i < j and data[j] > tmp_data) { j--; };
+  		if (i < j) {
+  			data[i++] = data[j];
+  		}
+  		while (i < j and data[i] <= tmp_data) { i++; };
+  		if (i < j) {
+  			data[j--] = data[i];
+  		}
+  	}
+  	data[i] = tmp_data;
+  
+  	if (lowIndex < i - 1) { quickSort(data, lowIndex, i - 1); }
+  	if (highIndex > i + 1) { quickSort(data, i + 1, highIndex); }
+  
+  }
+  ```
+
+- `float sortSpeedUp(const float data[], const int len, float result[]) ` 双机加速版本
+
+  对于全体数据：

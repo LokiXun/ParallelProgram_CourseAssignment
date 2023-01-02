@@ -154,7 +154,7 @@ float sort(const float data[], const int len, float result[]) {
 }
 
 
-// ================================SUM
+// =============================================== SUM
 /*
 * Sum : Speed Up Using SSE + OpenMP
 * Func 对数据部分范围 [startIndex，endIndex] 闭区间, 求和。按 8 个数分块，使用SSE 256bit，最后一块不足 8 个对的部分就直接加
@@ -233,14 +233,14 @@ float SumArray_speedUp(const float data[], const int startIndex, const int endIn
 */
 float sumSpeedUp(const float data[], const int len) {
 	float ret;
-	int ind; // client 处理前面一半数据，len 为数据长度
+	int firstHalfLen; // client 处理前面一半数据，len 为数据长度
 	enum Method mtd = Method::MT_SUM;
 	//向Server端发送分布运算请求
 	send(cltConnection, (char*)&mtd, sizeof(Method), NULL);
 	//获得任务分配: 前半段数组的结尾下标
-	recv(cltConnection, (char*)&ind, sizeof(int), NULL);
+	recv(cltConnection, (char*)&firstHalfLen, sizeof(int), NULL);
 	//求解分任务
-	ret = SumArray_speedUp(data, 0, ind);
+	ret = SumArray_speedUp(data, 0, firstHalfLen-1);
 	std::cout << "Current Client Sum result = " << ret << std::endl;
 	//把结果发送给Server端整合
 	send(cltConnection, (char*)&ret, sizeof(ret), NULL);
@@ -251,6 +251,7 @@ float sumSpeedUp(const float data[], const int len) {
 	return ret;
 }
 
+// =============================================== MAX
 /*
 * 求最大值加速版（单机版）
 * @data 待求和的float一维数组
@@ -286,8 +287,24 @@ float singleSpdMax(const float data[], const int stInd, const int len) {
 	return ret;
 }
 
+/*
+* 求最大值 多线程版本
+*/
+DWORD WINAPI maxArray_multithread(LPVOID lpParameter)
+{
+	THREAD_DATA_SORT* threadData = (THREAD_DATA_SORT*)lpParameter;
 
+	int end_index = threadData->start_index + threadData->block_data_len;
+	float max_value = rawFloatData[threadData->start_index];
+	for (int i = threadData->start_index; i < end_index; i++)
+	{
+		max_value = max_value >= rawFloatData[i] ? max_value : rawFloatData[i];//
+	}
+	floatResults[threadData->thread_id] = max_value;
+	ReleaseSemaphore(hSemaphores[threadData->thread_id], 1, NULL);//释放信号量，信号量加1 
 
+	return 0;
+}
 
 
 /*
@@ -297,27 +314,77 @@ float singleSpdMax(const float data[], const int stInd, const int len) {
 * @return 数组data全元素中最大值
 */
 float maxSpeedUp(const float data[], const int len) {
-	float ret;
-	int ind;
+	int firstHalfLen; // client 处理前面一半数据，len 为数据长度
 	enum Method mtd = Method::MT_MAX;//请求类型为max方法
-	//向Server端发送分布运算请求
+	//0. 向Server端发送分布运算请求
 	send(cltConnection, (char*)&mtd, sizeof(Method), NULL);
-	//获得任务分配
-	recv(cltConnection, (char*)&ind, sizeof(int), NULL);
-	//求解分任务
-	ret = myMax(data, ind + 1);
-	std::cout << "Current Client Max result = " << ret << std::endl;
-	//把结果发送给Server端整合
-	send(cltConnection, (char*)&ret, sizeof(ret), NULL);
-	std::cout << "Send2Server success!" << std::endl;
+	//1. 计算前面一半
+	recv(cltConnection, (char*)&firstHalfLen, sizeof(int), NULL);
+	//ret = myMax(data, firstHalfLen);
+	//std::cout << "Current Client Max result = " << ret << std::endl;
+	
+	LARGE_INTEGER start_time, end_time, time_freq;
+	QueryPerformanceFrequency(&time_freq);
+	QueryPerformanceCounter(&start_time);//start  
+	//================================================multi-thread
+	THREAD_DATA_SORT* current_thread_data = new THREAD_DATA_SORT[MAX_THREADS];
+	HANDLE hThreads[MAX_THREADS];
+	// 1.1 create thread task
+	for (int thread_index = 0; thread_index < MAX_THREADS; thread_index++)
+	{
+		hSemaphores[thread_index] = CreateSemaphore(NULL, 0, 1, NULL);
+		// 线程输入数据
+		current_thread_data[thread_index].thread_id = thread_index;
+		current_thread_data[thread_index].start_index = 0;	// index in origin rawData
+		current_thread_data[thread_index].block_data_len = CLIENT_SUBDATANUM;  // [start, end)
+		floatResults[thread_index] = data[current_thread_data[thread_index].start_index];  // set default
 
-	////从Server端得到最终结果
-	//recv(cltConnection, (char*)&ret, sizeof(ret), NULL);
+		hThreads[thread_index] = CreateThread(
+			NULL,// default security attributes
+			0,// use default stack size
+			maxArray_multithread,// thread function
+			&current_thread_data[thread_index],// argument to thread function
+			CREATE_SUSPENDED, // use default creation flags.0 means the thread will be run at once  CREATE_SUSPENDED
+			NULL);
+
+		if (hThreads[thread_index] == NULL)
+		{
+			printf("WARN: hThreads=%d CreateThread error: %d\n", thread_index, GetLastError());
+			throw std::exception("WARN: getMax CreateThread error!");
+		}
+	}
+	// 1.2.execute + wait
+	for (int i = 0; i < MAX_THREADS; i++)
+	{
+		ResumeThread(hThreads[i]);
+	}
+	std::cout << "Satrt WaitForMultipleObjects for 2mins!" << std::endl;
+	DWORD ThreadFinished = WaitForMultipleObjects(MAX_THREADS, hSemaphores, TRUE, 2 * 60 * 1000);
+	if (!((WAIT_OBJECT_0 <= ThreadFinished) && (ThreadFinished <= (WAIT_OBJECT_0 + MAX_THREADS - 1)))) {
+		// exception
+		printf("WARN: thread end exception! ThreadFinished=%d", ThreadFinished);
+		throw std::exception("WARN: getMax thread end exception!");
+	}
+	delete[] current_thread_data;
+
+
+	// 1.3 get result
+	float client_max_result = data[0];
+	for (int i = 0; i < MAX_THREADS; i++)
+		client_max_result = client_max_result > floatResults[i] ? client_max_result : floatResults[i];
+
+	QueryPerformanceCounter(&end_time);//start 
+	std::cout << "CLIENT Get Maxiumu finished! max_value=" << client_max_result <<
+		", costs = " << ((double)end_time.QuadPart - start_time.QuadPart) / (double)time_freq.QuadPart << "s" << std::endl;
+
+	//2. 把结果发送给Server端整合
+	send(cltConnection, (char*)&client_max_result, sizeof(client_max_result), NULL);
+	std::cout << "Send2Server success!" << std::endl;
 
 	return ret;
 }
 
-// ============================================ SORT
+// =============================================== SORT
 DWORD WINAPI sortArray_multithread(LPVOID lpParameter)
 {
 	THREAD_DATA_SORT* threadData = (THREAD_DATA_SORT*)lpParameter;
