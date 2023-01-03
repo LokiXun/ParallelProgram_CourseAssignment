@@ -1,4 +1,4 @@
-﻿﻿﻿﻿﻿﻿﻿﻿﻿# Parallel Programming Course Assignment :baby_chick:
+﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿# Parallel Programming Course Assignment :baby_chick:
 
 Team: RongjiXun, JianLiangChen
 

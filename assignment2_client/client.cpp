@@ -105,8 +105,8 @@ float sum(const float data[], const int len) {
 		int SubDataElementNum = (i + 1 == MAX_THREADS) ? (len - subDataStartIndex) : subDataNum; // 判断此块元素个数
 
 		for (int j = 0; j < SubDataElementNum; ++j) {
-			//retSum[i] += log(sqrt(data[j + subDataStartIndex]));  // 模拟任务，增加计算量
-			retSum[i] += data[j + subDataStartIndex];
+			retSum[i] += log(sqrt(data[j + subDataStartIndex]));  // 模拟任务，增加计算量
+			//retSum[i] += data[j + subDataStartIndex];
 		}
 	}
 
@@ -164,13 +164,15 @@ float sort(const float data[], const int len, float result[]) {
 * @return 数组data全元素的和
 */
 float SumArray_speedUp(const float data[], const int startIndex, const int endIndex) {
+
+	if (endIndex >= DATANUM) {
+		throw std::exception("Sum func, endIndex >= DATANUM");
+	}
 	if (endIndex < startIndex) {
 		throw std::exception("Sum func, endIndex<startIndex");
 	}
+
 	int part_array_len = endIndex - startIndex + 1;
-	for (int i = startIndex; i <= endIndex; i++) {
-		std::cout << data[i] << std::endl;
-	}
 
 
 	//SSE加速 
@@ -185,14 +187,13 @@ float SumArray_speedUp(const float data[], const int startIndex, const int endIn
 	float* retSum2 = new float[sse_iter] {0};
 	float ret = 0.0f;
 
-#pragma omp parallel for//omp多线程加速
+#pragma omp parallel for//omp多线程加速: 计算 sqrt+log + 分块
 	for (int i = 0; i < sse_iter; ++i) {
-		__m256* ptr = (__m256*)stPtr + i * SSE_parallel_num;//每个线程的起始点为 data+i*单个线程循环次数
-		for (int j = 0; j < sse_iter; ++j, ++ptr) {//单个线程循环次数为sse_iter/最大线程数，起始只要保证整数就行
-			//_mm256_store_ps(retSum[i], _mm256_add_ps(*(__m256*)retSum[i], _mm256_log_ps(_mm256_sqrt_ps((*ptr)))));//SSE指令套娃
-			_mm256_store_ps(retSum[i], _mm256_add_ps(*(__m256*)retSum[i], *ptr));//SSE指令套娃
-		}
+		__m256* ptr = (__m256*)(stPtr + i * SSE_parallel_num);//每个线程的起始点为 data+i*单个线程循环次数
+		_mm256_store_ps(retSum[i], _mm256_add_ps(*(__m256*)retSum[i], *ptr));//SSE指令套娃
+		//_mm256_store_ps(retSum[i], _mm256_add_ps(*(__m256*)retSum[i], _mm256_log_ps(_mm256_sqrt_ps((*ptr)))));
 	}
+
 	//整合结果
 #pragma omp parallel for
 	for (int i = 0; i < sse_iter; ++i) {
@@ -204,16 +205,13 @@ float SumArray_speedUp(const float data[], const int startIndex, const int endIn
 
 	for (int i = 0; i < sse_iter; i++) {
 		ret += retSum2[i];
-		std::cout << "retSum2[i]=" << retSum2[i] << std::endl;
-		std::cout << "ret=" << ret << std::endl;
 	}
 
 	// 处理最后一个未整除的块
 	for (int i = startIndex + sse_iter * SSE_parallel_num; i <= endIndex; ++i) {
 		//ret += log(sqrt(data[i]));
-		std::cout << "data[i]=" << data[i] << "ret=" << ret << std::endl;
 		ret += data[i];
-
+		//std::cout << "data[i]=" << data[i] << "ret=" << ret << std::endl;
 	}
 
 	//回收动态数组内存
@@ -617,7 +615,8 @@ int main() {
 	//数据测试相关
 	srand(RANDOM_SEED);
 	for (size_t i = 0; i < DATANUM; i++) {//数据初始化
-		rawFloatData[i] = fabs(double(rand()));  // float(i + 1);
+		//rawFloatData[i] = fabs(double(rand()));  // float(i + 1);
+		rawFloatData[i] = float(i + 1);
 	}
 	for (size_t i = 0; i < min(DATANUM, 10); i++) {
 		std::cout << rawFloatData[i] << " ";

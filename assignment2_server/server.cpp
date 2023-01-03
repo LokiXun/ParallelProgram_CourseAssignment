@@ -65,7 +65,10 @@ int closeSocket() {
 // No speedUp
 float SimpleSum(const float data[], const int len) {
 	float result = 0.0f;
-	for (int i = 0; i < len; i++) result += log10(sqrt(data[i] / 4.0));
+	for (int i = 0; i < len; i++) {
+		//result += log10(sqrt(data[i] / 4.0));
+		result += data[i];
+	}
 
 	return result;
 }
@@ -88,9 +91,6 @@ float SumArray_speedUp(const float data[], const int startIndex, const int endIn
 	}
 
 	int part_array_len = endIndex - startIndex + 1;
-	for (int i = startIndex; i <= endIndex; i++) {
-		std::cout << data[i] << std::endl;
-	}
 
 
 	//SSE加速 
@@ -105,14 +105,13 @@ float SumArray_speedUp(const float data[], const int startIndex, const int endIn
 	float* retSum2 = new float[sse_iter] {0};
 	float ret = 0.0f;
 
-#pragma omp parallel for//omp多线程加速
+#pragma omp parallel for//omp多线程加速: 计算 sqrt+log + 分块
 	for (int i = 0; i < sse_iter; ++i) {
-		__m256* ptr = (__m256*)stPtr + i * SSE_parallel_num;//每个线程的起始点为 data+i*单个线程循环次数
-		for (int j = 0; j < sse_iter; ++j, ++ptr) {//单个线程循环次数为sse_iter/最大线程数，起始只要保证整数就行
-			//_mm256_store_ps(retSum[i], _mm256_add_ps(*(__m256*)retSum[i], _mm256_log_ps(_mm256_sqrt_ps((*ptr)))));//SSE指令套娃
-			_mm256_store_ps(retSum[i], _mm256_add_ps(*(__m256*)retSum[i], *ptr));//SSE指令套娃
-		}
+		__m256* ptr = (__m256*)(stPtr + i * SSE_parallel_num);//每个线程的起始点为 data+i*单个线程循环次数
+		_mm256_store_ps(retSum[i], _mm256_add_ps(*(__m256*)retSum[i], *ptr));//SSE指令套娃
+		//_mm256_store_ps(retSum[i], _mm256_add_ps(*(__m256*)retSum[i], _mm256_log_ps(_mm256_sqrt_ps((*ptr)))));
 	}
+
 	//整合结果
 #pragma omp parallel for
 	for (int i = 0; i < sse_iter; ++i) {
@@ -124,16 +123,13 @@ float SumArray_speedUp(const float data[], const int startIndex, const int endIn
 
 	for (int i = 0; i < sse_iter; i++) {
 		ret += retSum2[i];
-		std::cout << "retSum2[i]=" << retSum2[i] << std::endl;
-		std::cout << "ret=" << ret << std::endl;
 	}
 
 	// 处理最后一个未整除的块
 	for (int i = startIndex + sse_iter * SSE_parallel_num; i <= endIndex; ++i) {
 		//ret += log(sqrt(data[i]));
-		std::cout << "data[i]=" << data[i] << "ret=" << ret << std::endl;
 		ret += data[i];
-
+		//std::cout << "data[i]=" << data[i] << "ret=" << ret << std::endl;
 	}
 
 	//回收动态数组内存
@@ -161,7 +157,7 @@ float sumSpeedUp(const float data[], const int len) {
 	send(servConnection, (char*)&firstHalfLen, sizeof(int), NULL);
 
 	//1. server 算计算后一半
-	retSum[0] = SumArray_speedUp(data, firstHalfLen, DATANUM-1);
+	retSum[0] = SumArray_speedUp(data, firstHalfLen, DATANUM - 1);
 
 	//2. 接收Client端的结果
 	recv(servConnection, (char*)&retSum[1], sizeof(float), NULL);
@@ -518,7 +514,8 @@ int main() {
 	//初始化
 	srand(RANDOM_SEED);
 	for (size_t i = 0; i < DATANUM; i++) {//数据初始化
-		rawFloatData[i] = fabs(float(rand()));  // float(i + 1);
+		//rawFloatData[i] = fabs(float(rand()));  // float(i + 1);
+		rawFloatData[i] = float(i + 1);
 	}
 	float ret = 0.0f;
 
