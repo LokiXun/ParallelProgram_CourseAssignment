@@ -114,6 +114,8 @@ my_2d_matrix_result = My2dMatrix(np.array([[]]))
 
 ## 大作业
 
+### 作业要求
+
 内容：两人一组，利用相关**C++和加速(sse，多线程)手段，以及通讯技术(1.rpc，命名管道，2.http，socket)**等实现函数（浮点数**数组求和，求最大值，排序**）。处理在两台计算机**协作**执行，尽可能挖掘两个计算机的潜在算力。所编写功能在 **python 环境中调用**，并和 python 实现的该功能的代码进行性能比较。
 
 要求：书写完整报告，给出设计思路和结果。特别备注我重现你们代码时，需要修改的位置和含义，精确到文件的具体行。
@@ -192,10 +194,129 @@ my_2d_matrix_result = My2dMatrix(np.array([[]]))
 
 大家注意，如果单机上那么大数据量无法计算，要想办法**可能会遇到超大数加很小数加不上的现象**。修改 `#define SUBDATANUM 2000000` 为 `#define SUBDATANUM 1000000`做单机计算。双机上每个计算机都申请`#define SUBDATANUM 1000000`大的数据，即实现`#define SUBDATANUM 2000000`的运算。
 
+
+
+### 原始数据
+
+```cpp
+// Data: 数据分为MAX_THREADS=64 块，每块SUBDATANUM个数据。整体数据分为两半，client处理前一半数据 （64*CLIENT_SUBDATANUM），server处理后一半数据（64*SERVER_SUBDATANUM）
+#define MAX_THREADS     3          // 线程数：64
+#define SUBDATANUM      20     // 子块数据量：2000000  tips: 生成随机数，有很多0，ok的
+#define DATANUM         (SUBDATANUM*MAX_THREADS)  // 总数据量：线程数x子块数据量
+#define SERVER_SUBDATANUM  10     // gaurantee SERVER_SUBDATANUM+CLIENT_SUBDATANUM == SUBDATANUM
+#define CLIENT_SUBDATANUM  10    // 单PC数据：1000000
+#define SERVER_DATANUM	(SERVER_SUBDATANUM * MAX_THREADS)
+#define CLIENT_DATANUM	(CLIENT_SUBDATANUM * MAX_THREADS)
+#define TEST_REPEAT_NUM		5		// 测试单机 sum, max, sort 的重复次数
+```
+
+- 总数据量
+  固定 `client` 和 `server` 各自的线程数均为 `MAX_THREADS`, 假设每个线程处理一块数据（认为整体数据分块） 每一块有`SUBDATANUM` 个数据。因此整体数据量 `DATANUM = SUBDATANUM*MAX_THREADS `
+
+  - 数据初始化
+
+    ```cpp
+    srand(RANDOM_SEED);
+    for (size_t i = 0; i < DATANUM; i++) {//数据初始化
+        rawFloatData[i] = fabs(float(rand()));  // float(i + 1);
+        //rawFloatData[i] = float(i + 1);
+    }
+    ```
+
+- **双机加速方案 :star:**
+
+  对于整体数据对半切分，前面一半给 `client` 处理，后一半给 `server` 处理。各自由于都开 `MAX_THREADS` 个线程，每个线程的数据块大小也相应对半分。
+
+  > 例如：原始数据 `SUBDATANUM=20`， `SERVER_SUBDATANUM=10` `CLIENT_SUBDATANUM = SUBDATANUM - SERVER_SUBDATANUM`
+
+
+
 ### sum
 
-- 单机不加速版本 `float SimpleSum(const float data[], const int len)`
-  
+- 单机不加速版本 
+  `float SimpleSum(const float data[], const int len)`
+  直接顺序相加
+
+  ```cpp
+  // No speedUp
+  float SimpleSum(const float data[], const int len) {
+  	float result = 0.0f;
+  	for (int i = 0; i < len; i++) {
+  		//result += log10(sqrt(data[i] / 4.0));
+  		result += data[i];
+  	}
+  	return result;
+  }
+  ```
+
+- 双机加速
+  `float SumArray_speedUp(const float data[], const int startIndex, const int endIndex)` 
+
+  > `server.cpp` 和 `client.cpp` 中均有 :shit: 目前在 win10 上跑，单独起 client 和 server
+  >
+  > - `data` 原始数据
+  > - `startIndex`, `endIndex` 为需要相加元素的下标范围：client 处理总数据的前一半，server 处理后一半，根据下标区分。
+
+  原始数据使用 `float` 类型，对于 `__mm256 bit` SSE 可以同时处理 8 个 `float` 数据。
+
+  - omp多线程加速: 计算 sqrt+log + 数据分块（每块8个数据）
+
+    ```cpp
+    //SSE加速 
+    int SSE_parallel_num = 8; //float为32bit，则256位可以一次处理256/32=8个float
+    int sse_iter = int(floor(part_array_len / SSE_parallel_num)); // 防止不能整除
+    const float* stPtr = data + startIndex;
+    
+    float** retSum = new float* [sse_iter];
+    for (int i = 0; i < sse_iter; ++i) {
+        retSum[i] = new float[SSE_parallel_num] { 0 };
+    }
+    float* retSum2 = new float[sse_iter] {0};
+    float ret = 0.0f;
+    
+    #pragma omp parallel for//omp多线程加速: 计算 sqrt+log + 分块
+    for (int i = 0; i < sse_iter; ++i) {
+        __m256* ptr = (__m256*)(stPtr + i * SSE_parallel_num);//每个线程的起始点为 data+i*单个线程循环次数
+        _mm256_store_ps(retSum[i], _mm256_add_ps(*(__m256*)retSum[i], *ptr));//SSE指令套娃
+        //_mm256_store_ps(retSum[i], _mm256_add_ps(*(__m256*)retSum[i], _mm256_log_ps(_mm256_sqrt_ps((*ptr)))));
+    }
+    ```
+
+  - 对于处理结束（sqrt+log）的每个分块数据，用 openmp 开线程相加，得到`sse_iter`个结果
+
+    ```cpp
+    //整合结果
+    #pragma omp parallel for
+    for (int i = 0; i < sse_iter; ++i) {
+        for (int j = 0; j < SSE_parallel_num; ++j) {
+            retSum2[i] += retSum[i][j];
+        }
+        delete[] retSum[i];//顺道回收内存
+    }
+    ```
+
+  - 整合数据，把`sse_iter` 个结果，和一开始分块剩余的数据，一起加起来
+
+    ```cpp
+    for (int i = 0; i < sse_iter; i++) {
+        ret += retSum2[i];
+    }
+    
+    // 处理最后一个未整除的块
+    for (int i = startIndex + sse_iter * SSE_parallel_num; i <= endIndex; ++i) {
+        //ret += log(sqrt(data[i]));
+        ret += data[i];
+        //std::cout << "data[i]=" << data[i] << "ret=" << ret << std::endl;
+    }
+    ```
+
+    
+
+- 测试结果
+
+
+
+
 
 ### sort
 

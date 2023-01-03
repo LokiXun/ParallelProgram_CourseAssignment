@@ -19,30 +19,6 @@ int ret, recv_len, send_len, sin_size; // 一些网络收发相关变量
 
 
 
-//#pragma region method_declaraion
-////单机版
-////不采取任何加速手段
-//float sum(const float data[], const int len); //data是原始数据，len为长度。结果通过函数返回
-//float myMax(const float data[], const int len);//data是原始数据，len为长度。结果通过函数返回
-//float sort(const float data[], const int len, float  result[]);//data是原始数据，len为长度。排序结果在result中。
-//
-////双机加速版本
-////采取多线程和SSE技术加速
-//int initCltSocket();//初始化Socket
-//int closeSocket();//关闭Socket
-//float sumSpeedUp(const float data[], const int len); //data是原始数据，len为长度。结果通过函数返回
-//float maxSpeedUp(const float data[], const int len);//data是原始数据，len为长度。结果通过函数返回
-//float sortSpeedUp(const float data[], const int len, float result[]);//data是原始数据，len为长度。排序结果在result中。
-//void quickSort(float* data, int lowIndex, int highIndex);
-//
-////用于测试的函数
-//float test(float method(const float*, int), float data[], int len);
-//float test(float method(const float*, int, float*), float data[], int len, float result[]);
-//
-//#pragma endregion
-
-
-
 
 #pragma region method_defination
 /*
@@ -95,28 +71,16 @@ int closeSocket() {
 * @len float数组长度
 * @return 数组data全元素的和
 */
-float sum(const float data[], const int len) {
-	float* retSum = new float[MAX_THREADS] {0};
-	int subDataNum = int(ceil(len / MAX_THREADS));//为了增加数值稳定性，进一步细分求解区域（然而还是有误差）
-	float sumResult = 0.0f;
-	//分块求和
-	for (int i = 0; i < MAX_THREADS; ++i) {
-		int subDataStartIndex = i * subDataNum;
-		int SubDataElementNum = (i + 1 == MAX_THREADS) ? (len - subDataStartIndex) : subDataNum; // 判断此块元素个数
-
-		for (int j = 0; j < SubDataElementNum; ++j) {
-			retSum[i] += log(sqrt(data[j + subDataStartIndex]));  // 模拟任务，增加计算量
-			//retSum[i] += data[j + subDataStartIndex];
-		}
+float SimpleSum(const float data[], const int len) {
+	double result = 0.0f;
+	for (int i = 0; i < len; i++) {
+		//result += log10(sqrt(data[i] / 4.0));
+		result += data[i];
 	}
 
-	//整合结果
-	for (int i = 0; i < MAX_THREADS; ++i) {
-		sumResult += retSum[i];
-	}
-
-	return sumResult;
+	return result;
 }
+
 
 float myMax(const float data[], const int len) {
 	//float ret = log(sqrt(data[0]));
@@ -132,13 +96,10 @@ float myMax(const float data[], const int len) {
 }
 
 
-/*
-=================== SORT =====================
-*/
 
+//=================== SORT =====================
 /*
 * sort函数采用快排
-* 问题是快排写的可能有问题
 */
 float sort(const float data[], const int len, float result[]) {
 	//深复制data
@@ -238,13 +199,13 @@ float sumSpeedUp(const float data[], const int len) {
 	//获得任务分配: 前半段数组的结尾下标
 	recv(cltConnection, (char*)&firstHalfLen, sizeof(int), NULL);
 	//求解分任务
-	ret = SumArray_speedUp(data, 0, firstHalfLen-1);
+	ret = SumArray_speedUp(data, 0, firstHalfLen - 1);
 	std::cout << "Current Client Sum result = " << ret << std::endl;
 	//把结果发送给Server端整合
 	send(cltConnection, (char*)&ret, sizeof(ret), NULL);
 	std::cout << "Send2Server success!" << std::endl;
-	////从Server端得到最终结果
-	//recv(cltConnection, (char*)&ret, sizeof(ret), NULL);
+	//从Server端得到最终结果
+	recv(cltConnection, (char*)&ret, sizeof(ret), NULL);
 
 	return ret;
 }
@@ -256,21 +217,70 @@ float sumSpeedUp(const float data[], const int len) {
 * @len float数组长度
 * @return 数组data全元素中最大值
 */
-float singleSpdMax(const float data[], const int stInd, const int len) {
+extern "C"
+__declspec(dllexport) float singleSpdMax(const float data[], const int stInd, const int len) {
 	//局部变量
 	float ret;
-	float* retMax = new float[8] { 0 };//用于SSE加速的中间存储
-	int sse_iter = len / 8;//SSE迭代总长度
+
+	//SSE加速
+	int sse_parallel_num = 8;//256位同时计算8个float
+	int sse_iter = int(floor(len / sse_parallel_num));//SSE迭代总长度
+	int sse_leave_task = len - sse_parallel_num * sse_iter;//sse遗留任务
+	float* retMax = new float[sse_parallel_num] { 0 };//用于SSE加速的中间存储
 	const float* stPtr = data + stInd;//偏移后的数组首地址
+
+	if (len < sse_parallel_num) {//对于sse都不能用的情况直接遍历并返回
+		ret = log(sqrt(data[0]));
+		for (int i = 0; i < len; ++i) {
+			float value = log(sqrt(data[i]));
+			if (ret < value) {
+				ret = value;
+			}
+		}
+		return ret;
+	}
+
+	//多线程参数
+	int thread_num;//实际线程数
+	int min_thread_task = 32;//每个线程的最少任务数
+	int thread_task;//每个线程的任务
+	int thread_leave_task;//多线程遗留任务
+
+	if (sse_iter < min_thread_task) {
+		thread_num = 1;
+		thread_task = sse_iter;
+	}
+	else {
+		thread_num = int(floor(sse_iter / min_thread_task));
+		thread_num = min(MAX_THREADS, thread_num);//不得大于最大线程数
+		thread_task = int(floor(sse_iter / thread_num));
+	}
+	thread_leave_task = sse_iter - thread_num * thread_task;
+
+
 	//最大值赋初值
 	_mm256_store_ps(retMax, _mm256_log_ps(_mm256_sqrt_ps(*(__m256*)stPtr)));
 
 #pragma omp parallel for//omp多线程加速
-	for (int i = 0; i < MAX_THREADS; ++i) {
-		__m256* ptr = (__m256*)stPtr + i * sse_iter / MAX_THREADS;
+	for (int i = 0; i < thread_num; ++i) {
+		__m256* ptr = (__m256*)stPtr + i * thread_task;
 		//SSE加速
-		for (int j = 0; j < sse_iter / MAX_THREADS; ++j, ++ptr) {
+		for (int j = 0; j < thread_task; ++j, ++ptr) {
 			_mm256_store_ps(retMax, _mm256_max_ps(*(__m256*)retMax, _mm256_log_ps(_mm256_sqrt_ps((*ptr)))));
+		}
+	}
+
+	//多线程剩余任务存入retSum第一行
+	__m256* ptr = (__m256*)stPtr + thread_num * thread_task;
+	for (int i = 0; i < thread_leave_task; ++i, ++ptr) {
+		_mm256_store_ps(retMax, _mm256_max_ps(*(__m256*)retMax, _mm256_log_ps(_mm256_sqrt_ps((*ptr)))));
+	}
+
+	//sse剩余任务，并存入第一个元素
+	for (int i = 0; i < sse_leave_task; ++i) {
+		float value = log(sqrt(data[stInd + len - 1 - i]));
+		if (retMax[0] < value) {
+			retMax[0] = value;
 		}
 	}
 
@@ -284,6 +294,8 @@ float singleSpdMax(const float data[], const int stInd, const int len) {
 
 	return ret;
 }
+
+
 
 /*
 * 求最大值 多线程版本
@@ -311,7 +323,7 @@ DWORD WINAPI maxArray_multithread(LPVOID lpParameter)
 * @len float数组长度
 * @return 数组data全元素中最大值
 */
-float maxSpeedUp(const float data[], const int len) {
+float maxSpeedUp_multithread(const float data[], const int len) {
 	int firstHalfLen; // client 处理前面一半数据，len 为数据长度
 	enum Method mtd = Method::MT_MAX;//请求类型为max方法
 	//0. 向Server端发送分布运算请求
@@ -320,7 +332,7 @@ float maxSpeedUp(const float data[], const int len) {
 	recv(cltConnection, (char*)&firstHalfLen, sizeof(int), NULL);
 	//ret = myMax(data, firstHalfLen);
 	//std::cout << "Current Client Max result = " << ret << std::endl;
-	
+
 	LARGE_INTEGER start_time, end_time, time_freq;
 	QueryPerformanceFrequency(&time_freq);
 	QueryPerformanceCounter(&start_time);//start  
@@ -378,6 +390,35 @@ float maxSpeedUp(const float data[], const int len) {
 	//2. 把结果发送给Server端整合
 	send(cltConnection, (char*)&client_max_result, sizeof(client_max_result), NULL);
 	std::cout << "Send2Server success!" << std::endl;
+
+	return ret;
+}
+
+
+/*
+* 求最大值加速版
+* @data 待求和的float一维数组
+* @len float数组长度
+* @return 数组data全元素中最大值
+*/
+float maxSpeedUp(const float data[], const int len) {
+	float ret;
+	int ind;
+	enum Method mtd = Method::MT_MAX;//请求类型为max方法
+	//向Server端发送分布运算请求
+	send(cltConnection, (char*)&mtd, sizeof(Method), NULL);
+	//获得任务分配
+	recv(cltConnection, (char*)&ind, sizeof(int), NULL);
+	//求解分任务
+	ret = singleSpdMax(data, 0, ind + 1);
+	//std::cout << "Current Client Max result = " << ret << std::endl;
+	//把结果发送给Server端整合
+	send(cltConnection, (char*)&ret, sizeof(ret), NULL);
+	//std::cout << "Send2Server success!" << std::endl;
+
+	////从Server端得到最终结果
+	recv(cltConnection, (char*)&ret, sizeof(ret), NULL);
+
 
 	return ret;
 }
@@ -554,12 +595,12 @@ float sortSpeedUp(const float data[], const int len, float result[]) {
 	float* client_sort_reuslt_pointer = ClientSortMergedResult;
 	for (int i = 0; i < S_TIMES; i++)
 	{
-		if ((send_len = send(cltConnection, (char *)client_sort_reuslt_pointer, S_ONCE * sizeof(float), 0)) < 0)
+		if ((send_len = send(cltConnection, (char*)client_sort_reuslt_pointer, S_ONCE * sizeof(float), 0)) < 0)
 		{
 			printf("send result failed...\r\n");
 			return -1;
 		}
-		 //printf("%d, %f\r\n", send_len, *client_sort_reuslt_pointer);
+		//printf("%d, %f\r\n", send_len, *client_sort_reuslt_pointer);
 		client_sort_reuslt_pointer += S_ONCE;
 	}
 	if (S_LEFT)
@@ -570,7 +611,7 @@ float sortSpeedUp(const float data[], const int len, float result[]) {
 			return -1;
 		}
 		printf("%d, %f\r\n", send_len, *client_sort_reuslt_pointer);
-		
+
 	}
 	printf("Client sort result send successfully!\r\n");
 	std::cout << "Send2Server success!" << std::endl;
@@ -583,13 +624,23 @@ float sortSpeedUp(const float data[], const int len, float result[]) {
 * 测试用函数
 */
 float test(float method(const float*, int), float data[], int len) {
+	float ret;//返回值
 	LARGE_INTEGER start, end;//存放测试算法的起始时间戳
-	//测试算法
-	QueryPerformanceCounter(&start);//start  
-	float ret = method(data, len);
-	QueryPerformanceCounter(&end);//end
-	std::cout << "Time Consumed is: " << (end.QuadPart - start.QuadPart) << "ms." << std::endl;
-	std::cout << "The result is: " << ret << std::endl;
+	LARGE_INTEGER total;//总时间消耗
+	total.QuadPart = 0;
+
+	int testTurn = 5;//所需测试轮数
+	for (int i = 1; i <= testTurn; ++i) {
+		std::cout << "Test for " << i << " turn." << std::endl;
+		//测试算法
+		QueryPerformanceCounter(&start);//start  
+		ret = method(data, len);
+		QueryPerformanceCounter(&end);//end
+		total.QuadPart += end.QuadPart - start.QuadPart;
+		std::cout << "Time Consumed is: " << (end.QuadPart - start.QuadPart) / 1000 << "ms." << std::endl;
+		std::cout << "The result is: " << ret << std::endl;
+	}
+	std::cout << "Average time cost is " << total.QuadPart / 1000 / testTurn << " ms." << std::endl;
 	return ret;
 }
 
@@ -605,8 +656,6 @@ float test(float method(const float*, int, float*), float data[], int len, float
 	return 0;
 }
 
-
-
 //主函数
 int main() {
 	using namespace std;
@@ -615,8 +664,8 @@ int main() {
 	//数据测试相关
 	srand(RANDOM_SEED);
 	for (size_t i = 0; i < DATANUM; i++) {//数据初始化
-		//rawFloatData[i] = fabs(double(rand()));  // float(i + 1);
-		rawFloatData[i] = float(i + 1);
+		rawFloatData[i] = fabs(double(rand()));  // float(i + 1);
+		//rawFloatData[i] = float(i + 1);
 	}
 	for (size_t i = 0; i < min(DATANUM, 10); i++) {
 		std::cout << rawFloatData[i] << " ";
@@ -658,7 +707,7 @@ int main() {
 		switch (mtd) {
 		case Method::MT_SUM:
 			std::cout << "Testing sum method..." << endl;
-			test(sum, rawFloatData, DATANUM);
+			test(SimpleSum, rawFloatData, DATANUM);
 			std::cout << "Testing sumSpeedUp method..." << endl;
 			test(sumSpeedUp, rawFloatData, DATANUM);
 			break;

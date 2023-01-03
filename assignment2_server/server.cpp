@@ -166,6 +166,9 @@ float sumSpeedUp(const float data[], const int len) {
 	ret = retSum[0] + retSum[1];
 	std::cout << "Sum SpeedUp Calculate Finished! reesult = " << ret << std::endl;
 
+	//返回结果至Client端
+	send(servConnection, (char*)&ret, sizeof(ret), NULL);
+
 	return ret;
 }
 
@@ -186,22 +189,70 @@ float SimpleMax(const float data[], const int len) {
 * @endIndex 数组待处理范围的末尾元素下标
 * @return 数组data全元素中最大值
 */
-float singleSpdMax(const float data[], const int stInd, const int len) {
+extern "C"
+__declspec(dllexport) float singleSpdMax(const float data[], const int stInd, const int len) {
 	//局部变量
 	float ret;
-	float retMax[8];//用于SSE加速的中间存储
-	int sse_iter = len / 8;//SSE迭代总长度
+
+	//SSE加速
+	int sse_parallel_num = 8;//256位同时计算8个float
+	int sse_iter = int(floor(len / sse_parallel_num));//SSE迭代总长度
+	int sse_leave_task = len - sse_parallel_num * sse_iter;//sse遗留任务
+	float* retMax = new float[sse_parallel_num] { 0 };//用于SSE加速的中间存储
 	const float* stPtr = data + stInd;//偏移后的数组首地址
+
+	if (len < sse_parallel_num) {//对于sse都不能用的情况直接遍历并返回
+		ret = log(sqrt(data[0]));
+		for (int i = 0; i < len; ++i) {
+			float value = log(sqrt(data[i]));
+			if (ret < value) {
+				ret = value;
+			}
+		}
+		return ret;
+	}
+
+	//多线程参数
+	int thread_num;//实际线程数
+	int min_thread_task = 32;//每个线程的最少任务数
+	int thread_task;//每个线程的任务
+	int thread_leave_task;//多线程遗留任务
+
+	if (sse_iter < min_thread_task) {
+		thread_num = 1;
+		thread_task = sse_iter;
+	}
+	else {
+		thread_num = int(floor(sse_iter / min_thread_task));
+		thread_num = min(MAX_THREADS, thread_num);//不得大于最大线程数
+		thread_task = int(floor(sse_iter / thread_num));
+	}
+	thread_leave_task = sse_iter - thread_num * thread_task;
+
+
 	//最大值赋初值
 	_mm256_store_ps(retMax, _mm256_log_ps(_mm256_sqrt_ps(*(__m256*)stPtr)));
 
-	//TODO:双机加速
 #pragma omp parallel for//omp多线程加速
-	for (int i = 0; i < MAX_THREADS; ++i) {
-		__m256* ptr = (__m256*)stPtr + i * sse_iter / MAX_THREADS;
+	for (int i = 0; i < thread_num; ++i) {
+		__m256* ptr = (__m256*)stPtr + i * thread_task;
 		//SSE加速
-		for (int j = 0; j < sse_iter / MAX_THREADS; ++j, ++ptr) {
+		for (int j = 0; j < thread_task; ++j, ++ptr) {
 			_mm256_store_ps(retMax, _mm256_max_ps(*(__m256*)retMax, _mm256_log_ps(_mm256_sqrt_ps((*ptr)))));
+		}
+	}
+
+	//多线程剩余任务存入retSum第一行
+	__m256* ptr = (__m256*)stPtr + thread_num * thread_task;
+	for (int i = 0; i < thread_leave_task; ++i, ++ptr) {
+		_mm256_store_ps(retMax, _mm256_max_ps(*(__m256*)retMax, _mm256_log_ps(_mm256_sqrt_ps((*ptr)))));
+	}
+
+	//sse剩余任务，并存入第一个元素
+	for (int i = 0; i < sse_leave_task; ++i) {
+		int value = log(sqrt(data[stInd + len - 1 - i]));
+		if (retMax[0] < value) {
+			retMax[0] = value;
 		}
 	}
 
@@ -215,6 +266,7 @@ float singleSpdMax(const float data[], const int stInd, const int len) {
 
 	return ret;
 }
+
 
 /*
 * 求最大值 多线程版本
@@ -241,7 +293,7 @@ DWORD WINAPI maxArray_multithread(LPVOID lpParameter)
 * @len float数组长度
 * @return 数组data各元素中的最大值
 */
-float maxSpeedUp(const float data[], const int len) {
+float maxSpeedUp_multithread(const float data[], const int len) {
 	float ret;
 	float* retMax = new float[2] { 0 };
 	int firstHalfLen = MAX_THREADS * CLIENT_SUBDATANUM; // client 计算前面一部分数据长度
@@ -314,6 +366,35 @@ float maxSpeedUp(const float data[], const int len) {
 	QueryPerformanceCounter(&end_time);//start 
 	std::cout << "Max SpeedUp: result =" << ret << ", costs = " <<
 		((double)end_time.QuadPart - start_time.QuadPart) / (double)time_freq.QuadPart << "s" << std::endl;
+
+	return ret;
+}
+
+/**
+* 加速版求最大值 多线程
+* @data 待求最大元素的float一维数组
+* @len float数组长度
+* @return 数组data各元素中的最大值
+*/
+extern "C"
+__declspec(dllexport) float maxSpeedUp(const float data[], const int len) {
+	float ret;
+	float* retMax = new float[2] { 0 };
+	int ind = len / 2;//ind指client段所需计算到的下标
+	send(servConnection, (char*)&ind, sizeof(int), NULL);//发送运算任务
+	//然后server端自己算
+	retMax[0] = singleSpdMax(data, ind, len - ind);
+	//接收Client端的结果
+	recv(servConnection, (char*)&retMax[1], sizeof(float), NULL);
+	//整合结果
+	if (retMax[0] > retMax[1]) {
+		ret = retMax[0];
+	}
+	else {
+		ret = retMax[1];
+	}
+	//把最终结果返回Client端
+	send(servConnection, (char*)&ret, sizeof(ret), NULL);
 
 	return ret;
 }
@@ -505,7 +586,6 @@ float sortSpeedUp(const float data[], const int len, float result[]) {
 }
 
 
-
 //主函数
 int main() {
 	using namespace std;
@@ -514,8 +594,8 @@ int main() {
 	//初始化
 	srand(RANDOM_SEED);
 	for (size_t i = 0; i < DATANUM; i++) {//数据初始化
-		//rawFloatData[i] = fabs(float(rand()));  // float(i + 1);
-		rawFloatData[i] = float(i + 1);
+		rawFloatData[i] = fabs(float(rand()));  // float(i + 1);
+		//rawFloatData[i] = float(i + 1);
 	}
 	float ret = 0.0f;
 
@@ -544,17 +624,19 @@ int main() {
 		//cout << "Client message received.";
 		switch (mtd) {
 		case Method::MT_SUM:
-			// ============== Test SinglePC runtime
-			QueryPerformanceCounter(&start_time);//start  
-			result = SimpleSum(rawFloatData, DATANUM);
-			QueryPerformanceCounter(&end_time);
-			test_seconds = ((double)end_time.QuadPart - start_time.QuadPart) / (double)time_freq.QuadPart;
-			std::cout << "SimpleSum: Test result = " << result << ", costs = " << test_seconds << "s" << std::endl;
-
+			//// ============== Test SinglePC runtime
+			//QueryPerformanceCounter(&start_time);//start  
+			//result = SimpleSum(rawFloatData, DATANUM);
+			//QueryPerformanceCounter(&end_time);
+			//test_seconds = ((double)end_time.QuadPart - start_time.QuadPart) / (double)time_freq.QuadPart;
+			//std::cout << "SimpleSum: Test result = " << result << ", costs = " << test_seconds << "s" << std::endl;
 			// ============== 2-PC SpeedUp
 			cout << "Testing 2-PC SpeedUp sumSpeedup  method..." << endl;
+			QueryPerformanceCounter(&start_time);//start  
 			result = sumSpeedUp(rawFloatData, DATANUM);
-			cout << "The result is " << result << endl;
+			QueryPerformanceCounter(&end_time);
+			test_seconds = ((double)end_time.QuadPart - start_time.QuadPart) / (double)time_freq.QuadPart;
+			cout << "sumSpeedUp: result= " << result << ", costs = " << test_seconds << "s" << std::endl;
 			break;
 		case Method::MT_MAX:
 			// ============== Test SinglePC runtime
